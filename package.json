@@ -1,6 +1,6 @@
 {
-  "name": "electron-compression-app",
-  "version": "1.0.0",
+  "name": "cazip",
+  "version": "0.0.1",
   "description": "A compression software similar to Bandizip",
   "main": "main.js",
   "scripts": {
