@@ -58,10 +58,10 @@ export function Tabs({ tabs, activeTab, onTabChange, onTabClose, onNewTab }: Tab
                   className={`
                     px-4 py-2 text-sm font-medium group relative
                     ${
-                    activeTab === tab.id
-                      ? "bg-background text-foreground hover:bg-background"
-                      : "bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                  }
+                      activeTab === tab.id
+                        ? "bg-background text-foreground hover:bg-background"
+                        : "bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                    }
                     transition-colors duration-200 ease-in-out
                   `}
                   onClick={() => onTabChange(tab.id)}
@@ -74,10 +74,10 @@ export function Tabs({ tabs, activeTab, onTabChange, onTabClose, onNewTab }: Tab
                     className={`
                       ml-2 h-4 w-4 p-0 opacity-50 hover:opacity-100
                       ${
-                      activeTab === tab.id
-                        ? "hover:bg-accent hover:text-accent-foreground"
-                        : "hover:bg-background hover:text-foreground"
-                    }
+                        activeTab === tab.id
+                          ? "hover:bg-accent hover:text-accent-foreground"
+                          : "hover:bg-background hover:text-foreground"
+                      }
                     `}
                     onClick={(e) => {
                       e.stopPropagation()

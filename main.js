@@ -13,11 +13,12 @@ function createWindow() {
     minHeight: 600,
     webPreferences: {
       nodeIntegration: false,
-      contextIsolation: true,
       sandbox: false,
+      contextIsolation: true,
       preload: path.join(__dirname, "preload.js"),
     },
     frame: false, // Frameless window for custom title bar
+    icon: path.join(__dirname, "public", "cazip.png"), // Set the application icon
   })
 
   // Load the app
@@ -118,6 +119,43 @@ ipcMain.handle("fs:readDirectory", async (event, dirPath) => {
   }
 })
 
+ipcMain.handle("fs:deleteFile", async (event, filePath) => {
+  try {
+    const stats = await fs.promises.stat(filePath)
+
+    if (stats.isDirectory()) {
+      await fs.promises.rmdir(filePath, { recursive: true })
+    } else {
+      await fs.promises.unlink(filePath)
+    }
+
+    return true
+  } catch (error) {
+    console.error(`Error deleting file ${filePath}:`, error)
+    throw error
+  }
+})
+
+ipcMain.handle("fs:fileExists", async (event, filePath) => {
+  try {
+    await fs.promises.access(filePath)
+    return true
+  } catch (error) {
+    return false
+  }
+})
+
+ipcMain.handle("fs:createFile", async (event, filePath) => {
+  try {
+    // Create an empty file
+    await fs.promises.writeFile(filePath, "")
+    return true
+  } catch (error) {
+    console.error(`Error creating file ${filePath}:`, error)
+    throw error
+  }
+})
+
 // Helper function to format file size
 function formatFileSize(bytes) {
   if (bytes === 0) return "0 Bytes"
@@ -126,4 +164,3 @@ function formatFileSize(bytes) {
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
 }
-
