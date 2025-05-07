@@ -1,0 +1,44 @@
+.terminal-container {
+    width: 100%;
+    height: 100%;
+    min-height: 300px;
+    background-color: #1e1e1e;
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.terminal {
+    width: 100%;
+    height: 100%;
+    padding: 4px;
+    overflow: hidden;
+}
+
+/* 优化终端字体渲染 */
+.xterm {
+    font-feature-settings: "liga" 0;
+    font-variant-ligatures: none;
+}
+
+/* 增加终端滚动条样式 */
+.xterm .xterm-viewport::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+    background: #666;
+    border-radius: 4px;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
+    background: #888;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-track {
+    background: #333;
+    border-radius: 4px;
+}

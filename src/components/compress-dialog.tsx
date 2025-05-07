@@ -103,7 +103,7 @@ export function CompressDialog({ isOpen, onClose, selectedFiles, config }: Compr
       await compressionService.executeCommand({
         rustExecutablePath: config.rustExecutablePath,
         target: targetPath,
-        sources: selectedFiles,
+        sources: selectedFiles.map(e => `'${e}'`),
         format: archiveType,
         method: getCompressionMethod(),
         password: usePassword && isPasswordAvailable ? password : undefined,

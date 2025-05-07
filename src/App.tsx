@@ -32,6 +32,7 @@ import path from "path-browserify"
 import { NewFileDialog } from "./components/new-file-dialog"
 import { commandService } from "./services/command-service"
 import { ContextMenu } from "./components/context-menu"
+import XTerminal from "@/src/components/console/Xterm";
 
 interface Tab {
   id: string
@@ -578,6 +579,10 @@ export default function App() {
               onExecuteCommand={executeCommand}
               onRefresh={handleRefresh}
           />
+
+          {/*<div style={{width:'100%', height: '400px'}}>*/}
+          {/*  <XTerminal/>*/}
+          {/*</div>*/}
 
           <AlertDialog open={tabToClose !== null} onOpenChange={() => setTabToClose(null)}>
             <AlertDialogContent>

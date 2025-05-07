@@ -86,7 +86,7 @@ export function ExtractDialog({
         volumeSize: undefined,
         format: undefined,
         method: undefined,
-        selectedFiles: selectedFiles.length > 0 ? selectedFiles : undefined,
+        selectedFiles: selectedFiles.length > 0 ? [selectedFiles.map(e => `'${e}'`).join(",")]: undefined,
       }
 
       await compressionService.executeCommand(command)

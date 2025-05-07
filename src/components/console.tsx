@@ -10,6 +10,44 @@ import { ScrollArea } from "./ui/scroll-area"
 import { Input } from "./ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs"
 import { useTheme } from "next-themes"
+import ansiToHTML from 'ansi-to-html'
+
+// ANSI converter
+const ansiConverter = new ansiToHTML({
+  newline: true,
+  escapeXML: true,
+  colors: {
+    0: '#000000', // black
+    1: '#ff0000', // red
+    2: '#00ff00', // green
+    3: '#ffff00', // yellow
+    4: '#0000ff', // blue
+    5: '#ff00ff', // magenta
+    6: '#00ffff', // cyan
+    7: '#ffffff', // white
+    8: '#808080', // gray
+    9: '#ff8080', // light red
+    10: '#80ff80', // light green
+    11: '#ffff80', // light yellow
+    12: '#8080ff', // light blue
+    13: '#ff80ff', // light magenta
+    14: '#80ffff', // light cyan
+    15: '#ffffff'  // bright white
+  }
+})
+
+// Helper function to convert ANSI escape sequences to HTML
+const convertAnsiToHTML = (text) => {
+  if (!text) return ''
+
+  // Process ANSI escape sequences
+  try {
+    return ansiConverter.toHtml(text)
+  } catch (e) {
+    console.error('Error converting ANSI to HTML:', e)
+    return text
+  }
+}
 
 // 控制台主题类型
 type ConsoleTheme = "system" | "dark" | "light"
@@ -20,6 +58,7 @@ interface LogEntry {
   timestamp: string
   type: "info" | "error" | "warning" | "success" | "command" | "result"
   text: string
+  html?: string // Added HTML version of text with ANSI codes converted
   isNew: boolean
 }
 
@@ -114,6 +153,14 @@ export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand
     }
 
     return { restContent: cleanedLine };
+  }
+
+  // 清理ANSI转义序列以在纯文本中显示
+  const stripAnsiCodes = (text) => {
+    if (!text) return text;
+
+    // 移除所有ANSI转义序列
+    return text.replace(/\u001b\[\d+(;\d+)*m/g, '');
   }
 
   // 格式化日志文本（添加语法高亮）
@@ -225,6 +272,9 @@ export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand
         // 清理双重时间戳（格式如 [18:30:06] 18:30:06: ）
         let cleanedLog = log;
 
+        // 检测是否包含ANSI转义序列
+        const containsAnsi = /\u001b\[\d+(;\d+)*m/.test(cleanedLog);
+
         // 匹配第一种模式：[时间] 时间:
         const doubleTimePattern = /^\[(\d{2}:\d{2}:\d{2})\]\s+(\d{2}:\d{2}:\d{2}):/;
         if (doubleTimePattern.test(cleanedLog)) {
@@ -272,30 +322,38 @@ export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand
         groupLogs.forEach((log, logIndex) => {
           // 判断日志类型
           let type: LogEntry["type"] = "info";
-          if (log.toLowerCase().includes("error") || log.toLowerCase().includes("失败")) {
+
+          // 去除ANSI转义序列后的文本，用于类型判断
+          const plainText = stripAnsiCodes(log);
+
+          if (plainText.toLowerCase().includes("error") || plainText.toLowerCase().includes("失败")) {
             type = "error";
-          } else if (log.toLowerCase().includes("warning") || log.toLowerCase().includes("警告")) {
+          } else if (plainText.toLowerCase().includes("warning") || plainText.toLowerCase().includes("警告")) {
             type = "warning";
-          } else if (log.toLowerCase().includes("success") || log.toLowerCase().includes("成功")) {
+          } else if (plainText.toLowerCase().includes("success") || plainText.toLowerCase().includes("成功")) {
             type = "success";
-          } else if (log.includes("$")) {
+          } else if (plainText.includes("$")) {
             type = "command";
-          } else if (log.startsWith(">")) {
+          } else if (plainText.startsWith(">")) {
             type = "result";
-          } else if (log.includes("Command completed with code 0")) {
+          } else if (plainText.includes("Command completed with code 0")) {
             type = "success";
-          } else if (log.includes("Command completed with code") && !log.includes("Command completed with code 0")) {
+          } else if (plainText.includes("Command completed with code") && !plainText.includes("Command completed with code 0")) {
             type = "error";
           }
 
           // 解析时间戳
           const { timestamp, restContent } = parseLogLine(log);
 
+          // 转换ANSI转义序列为HTML
+          const html = convertAnsiToHTML(log);
+
           const newLog: LogEntry = {
             id: Date.now() + groupIndex * 1000 + logIndex,
             timestamp: timestamp || group !== 'default' ? group : getTimestamp(),
             type,
             text: log,
+            html: html, // 保存带有HTML标签的文本
             isNew: !enhancedLogs.some(oldLog => oldLog.text === log)
           };
 
@@ -421,6 +479,7 @@ export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand
       timestamp: getTimestamp(),
       type,
       text,
+      html: convertAnsiToHTML(text), // 转换ANSI到HTML
       isNew: true
     }
 
@@ -572,7 +631,8 @@ export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand
 
   // 复制所有日志
   const copyLogs = () => {
-    const logText = enhancedLogs.map(log => `[${log.timestamp}] ${log.text}`).join('\n')
+    // 使用纯文本版本（无ANSI代码）
+    const logText = enhancedLogs.map(log => `[${log.timestamp}] ${stripAnsiCodes(log.text)}`).join('\n')
     navigator.clipboard.writeText(logText).then(() => {
       setIsCopied(true)
       setTimeout(() => setIsCopied(false), 2000)
@@ -581,7 +641,8 @@ export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand
 
   // 下载日志
   const downloadLogs = () => {
-    const logText = enhancedLogs.map(log => `[${log.timestamp}] [${log.type}] ${log.text}`).join('\n')
+    // 使用纯文本版本（无ANSI代码）
+    const logText = enhancedLogs.map(log => `[${log.timestamp}] [${log.type}] ${stripAnsiCodes(log.text)}`).join('\n')
     const blob = new Blob([logText], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -717,6 +778,12 @@ export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand
         overflow: "hidden" as const
       }
 
+  // 用于渲染HTML内容
+  const HtmlContent = ({ html }) => {
+    if (!html) return null;
+    return <span dangerouslySetInnerHTML={{ __html: html }} />;
+  };
+
   return (
       <div className={`fixed bottom-0 left-0 right-0 z-40 ${isFullscreen ? 'top-0' : ''}`}>
         {/* 控制台标题栏 */}
@@ -823,15 +890,6 @@ export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand
                 >
                   {enhancedLogs.length > 0 ? (
                       enhancedLogs.map((log, index) => {
-                        // 清理文本中的多余时间戳
-                        let displayText = log.text;
-                        // 匹配格式为 [18:30:06] 18:30:06: 的双时间戳
-                        const doubleTimestampRegex = /^\[(\d{2}:\d{2}:\d{2})\]\s*(\d{2}:\d{2}:\d{2}):/;
-                        if (doubleTimestampRegex.test(displayText)) {
-                          // 替换为单个时间戳
-                          displayText = displayText.replace(doubleTimestampRegex, '[$1]');
-                        }
-
                         return (
                             <div key={log.id} className={`inline ${log.isNew ? "console-log-entry" : ""}`}>
                               <span className="text-gray-500">[{log.timestamp}]</span>
@@ -845,8 +903,8 @@ export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand
                             ${log.type === "result" ? "text-purple-500" : ""}
                           `}
                               >
-                          {formatLogText(displayText)}
-                        </span>
+                                {log.html ? <HtmlContent html={log.html} /> : formatLogText(log.text)}
+                              </span>
                             </div>
                         );
                       })
@@ -868,15 +926,6 @@ export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand
                 >
                   {enhancedLogs.length > 0 ? (
                       enhancedLogs.map((log, index) => {
-                        // 清理文本中的多余时间戳
-                        let displayText = log.text;
-                        // 匹配格式为 [18:30:06] 18:30:06: 的双时间戳
-                        const doubleTimestampRegex = /^\[(\d{2}:\d{2}:\d{2})\]\s*(\d{2}:\d{2}:\d{2}):/;
-                        if (doubleTimestampRegex.test(displayText)) {
-                          // 替换为单个时间戳
-                          displayText = displayText.replace(doubleTimestampRegex, '[$1]');
-                        }
-
                         return (
                             <div key={log.id} className={`${log.isNew ? "console-log-entry" : ""}`}>
                               <span className="text-gray-500">[{log.timestamp}]</span>
@@ -890,8 +939,8 @@ export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand
                             ${log.type === "result" ? "text-purple-500" : ""}
                           `}
                               >
-                          {formatLogText(displayText)}
-                        </span>
+                                {log.html ? <HtmlContent html={log.html} /> : formatLogText(log.text)}
+                              </span>
                             </div>
                         );
                       })

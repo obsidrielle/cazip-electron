@@ -145,7 +145,8 @@ export function FileList({
           extension === "rar" ||
           extension === "7z" ||
           extension === "tar" ||
-          extension === "gz"
+          extension === "gz" ||
+          extension === "xz"
       ) {
         onOpenArchive(file.path)
       }

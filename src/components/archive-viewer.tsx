@@ -128,7 +128,7 @@ export function ArchiveViewer({ archivePath, onClose, onExtract, config }: Archi
             commandService.clearLogs()
 
             // 执行命令获取压缩包内容
-            const command = `${config.rustExecutablePath} -l -u / ${archivePath}`
+            const command = `${config.rustExecutablePath} -l -u ${archivePath}`
             await commandService.executeCommand(command)
 
             // 获取日志并解析JSON

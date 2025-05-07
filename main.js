@@ -1,9 +1,12 @@
 const { app, BrowserWindow, ipcMain, dialog } = require("electron")
 const path = require("path")
 const fs = require("fs")
+const os = require("os")
+// const pty = require('node-pty')
 const isDev = require("electron-is-dev")
 
 let mainWindow
+let ptyProcess = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -45,6 +48,13 @@ app.on("window-all-closed", () => {
 app.on("activate", () => {
   if (mainWindow === null) {
     createWindow()
+  }
+})
+
+app.on('before-quit', () => {
+  if (ptyProcess) {
+    ptyProcess.kill()
+    ptyProcess = null
   }
 })
 
@@ -156,6 +166,75 @@ ipcMain.handle("fs:createFile", async (event, filePath) => {
   }
 })
 
+
+ipcMain.handle('terminal:create', (event, shell) => {
+  try {
+    // 如果已经存在终端进程，先销毁它
+    if (ptyProcess !== null) {
+      ptyProcess.kill();
+      ptyProcess = null;
+    }
+
+    // 默认 shell
+    const defaultShell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
+    const shellToUse = shell || defaultShell;
+
+    // 创建 pty 进程
+    ptyProcess = pty.spawn(shellToUse, [], {
+      name: 'xterm-color',
+      cols: 80,
+      rows: 30,
+      cwd: os.homedir(),
+      env: process.env
+    });
+
+    // 处理 pty 进程输出的数据
+    ptyProcess.onData(data => {
+      // 确保窗口仍然存在
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('terminal:data', data);
+      }
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error creating terminal:', error);
+    return false;
+  }
+});
+
+// 向终端写入数据
+ipcMain.handle('terminal:write', (event, data) => {
+  if (ptyProcess) {
+    ptyProcess.write(data);
+    return true;
+  }
+  return false;
+});
+
+// 调整终端大小
+ipcMain.handle('terminal:resize', (event, cols, rows) => {
+  if (ptyProcess) {
+    try {
+      ptyProcess.resize(cols, rows);
+      return true;
+    } catch (error) {
+      console.error('Error resizing terminal:', error);
+      return false;
+    }
+  }
+  return false;
+});
+
+// 销毁终端
+ipcMain.handle('terminal:destroy', () => {
+  if (ptyProcess) {
+    ptyProcess.kill();
+    ptyProcess = null;
+    return true;
+  }
+  return false;
+});
 // Helper function to format file size
 function formatFileSize(bytes) {
   if (bytes === 0) return "0 Bytes"

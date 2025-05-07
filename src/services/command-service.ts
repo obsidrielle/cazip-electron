@@ -40,6 +40,7 @@ export class CommandService {
                 const process = window.electron.childProcess.spawn(executable, cleanArgs)
 
                 process.stdout.on("data", (data: string) => {
+                    console.log(data)
                     this.logCallback(data)
                     this.logs.push(data)
                 })
