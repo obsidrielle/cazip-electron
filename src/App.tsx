@@ -110,6 +110,9 @@ export default function App() {
   const [selectedArchiveFiles, setSelectedArchiveFiles] = useState<string[]>([])
   const [isPreviewDialogOpen, setIsPreviewDialogOpen] = useState(false)
   const [fileToPreview, setFileToPreview] = useState<string>("")
+  const [navigationHistory, setNavigationHistory] = useState<Record<string, string[]>>({})
+  const [canGoBack, setCanGoBack] = useState(false)
+  const [canGoForward, setCanGoForward] = useState(false)
 
   // Get selected files from the active tab
   const getSelectedFiles = useCallback(() => {
@@ -176,8 +179,22 @@ export default function App() {
   useEffect(() => {
     if (currentPath) {
       loadFiles(currentPath)
+      
+      // 添加到导航历史
+      const tab = tabs.find((t) => t.id === activeTab)
+      if (tab) {
+        // 将导航更新到路径历史
+        const tabHistory = navigationHistory[activeTab] || []
+        // 只有当当前路径与历史记录的最新路径不同时才添加
+        if (tabHistory.length === 0 || tabHistory[tabHistory.length - 1] !== currentPath) {
+          setNavigationHistory(prev => ({
+            ...prev,
+            [activeTab]: [...(prev[activeTab] || []), currentPath]
+          }))
+        }
+      }
     }
-  }, [currentPath, showHiddenFiles])
+  }, [currentPath, showHiddenFiles, activeTab, tabs])
 
   const loadFiles = async (path: string) => {
     try {
@@ -678,6 +695,47 @@ export default function App() {
       closeContextMenu()
     }
   }, [contextMenuProps.item, handlePreviewFile, closeContextMenu])
+
+  // 导航到上一个路径
+  const navigateBack = () => {
+    const history = navigationHistory[activeTab]
+    if (!history || history.length <= 1) return
+
+    // 找到当前路径在历史中的位置
+    const currentIndex = history.findIndex(p => p === currentPath)
+    if (currentIndex > 0) {
+      // 获取上一个路径
+      const prevPath = history[currentIndex - 1]
+      // 更新当前路径，但不添加到历史记录中
+      setCurrentPath(prevPath)
+      // 移除当前位置后的所有历史记录
+      setNavigationHistory(prev => ({
+        ...prev,
+        [activeTab]: history.slice(0, currentIndex)
+      }))
+    }
+  }
+
+  // 导航到下一个路径
+  const navigateForward = () => {
+    // 这个功能需要在navigateBack后保存临时的"前进"历史
+    // 目前简单实现，默认不启用
+    setCanGoForward(false)
+  }
+
+  // 更新导航状态
+  useEffect(() => {
+    const history = navigationHistory[activeTab]
+    if (history && history.length > 0) {
+      const currentIndex = history.findIndex(p => p === currentPath)
+      setCanGoBack(currentIndex > 0)
+      // 前进功能暂不实现
+      setCanGoForward(false)
+    } else {
+      setCanGoBack(false)
+      setCanGoForward(false)
+    }
+  }, [navigationHistory, currentPath, activeTab])
 
   return (
       <ThemeProvider

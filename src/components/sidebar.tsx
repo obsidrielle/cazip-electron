@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { FolderOpen, HardDrive, Home, FileArchive, ChevronRight, ChevronDown, Plus, X } from "lucide-react"
+import { FolderOpen, HardDrive, Home, FileArchive, ChevronRight, ChevronDown, Plus, X, Download, Image, Computer } from "lucide-react"
 import { Button } from "./ui/button"
 import { ScrollArea } from "./ui/scroll-area"
 import path from "path-browserify"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible"
 import { Input } from "./ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog"
+import { BookmarkManager } from "./bookmark-manager"
 
 interface SidebarProps {
   currentPath: string
@@ -41,7 +42,7 @@ const MAX_RECENT_ARCHIVES = 10
 export function Sidebar({ currentPath, setCurrentPath, showHiddenFiles }: SidebarProps) {
   const { t } = useTranslation()
   const [userHome, setUserHome] = useState("")
-  const [drives, setDrives] = useState<{ name: string; path: string }[]>([])
+  const [drives, setDrives] = useState<string[]>([])
   const [recentArchives, setRecentArchives] = useState<RecentArchive[]>([])
   const [folderTree, setFolderTree] = useState<FolderNode | null>(null)
   const [isRecentArchivesOpen, setIsRecentArchivesOpen] = useState(true)
@@ -51,6 +52,11 @@ export function Sidebar({ currentPath, setCurrentPath, showHiddenFiles }: Sideba
   const [newPathName, setNewPathName] = useState("")
   const [newPathLocation, setNewPathLocation] = useState("")
   const [editingQuickAccess, setEditingQuickAccess] = useState(false)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({
+    quickAccess: true,
+    drives: false,
+    bookmarks: true,
+  })
 
   // Load user home and drives
   useEffect(() => {
@@ -58,12 +64,11 @@ export function Sidebar({ currentPath, setCurrentPath, showHiddenFiles }: Sideba
     setUserHome(home)
 
     if (window.electron.os.platform === "win32") {
-      setDrives([
-        { name: "C:", path: "C:\\" },
-        { name: "D:", path: "D:\\" },
-      ])
+      setDrives(["C:", "D:"])
+    } else if (window.electron.os.platform === "darwin") {
+      setDrives(["/", "/Volumes"])
     } else {
-      setDrives([{ name: "/", path: "/" }])
+      setDrives(["/", "/home", "/mnt", "/media"])
     }
 
     // Load recent archives from localStorage
@@ -279,9 +284,36 @@ export function Sidebar({ currentPath, setCurrentPath, showHiddenFiles }: Sideba
     }
   }
 
+  const toggleExpanded = (section: string) => {
+    setExpanded(prev => ({
+      ...prev,
+      [section]: !prev[section]
+    }));
+  };
+
+  const navigateTo = (path: string) => {
+    setCurrentPath(path);
+  };
+
+  const getDesktopPath = () => {
+    return path.join(getUserHome(), "Desktop");
+  };
+
+  const getDownloadsPath = () => {
+    return path.join(getUserHome(), "Downloads");
+  };
+
+  const getDocumentsPath = () => {
+    return path.join(getUserHome(), "Documents");
+  };
+
+  const getPicturesPath = () => {
+    return path.join(getUserHome(), "Pictures");
+  };
+
   return (
-      <div className="w-56 bg-background border-r border-border flex flex-col">
-        <ScrollArea className="flex-1">
+      <div className="w-60 border-r border-border shrink-0 bg-card py-2 h-full flex flex-col">
+        <ScrollArea className="flex-grow">
           <div className="p-2">
             <div className="mb-4">
               <div className="flex items-center justify-between px-2 py-1">
@@ -333,13 +365,13 @@ export function Sidebar({ currentPath, setCurrentPath, showHiddenFiles }: Sideba
               </div>
               {drives.map((drive) => (
                   <Button
-                      key={drive.path}
+                      key={drive}
                       variant="ghost"
                       className="w-full justify-start text-sm h-8 px-4"
-                      onClick={() => setCurrentPath(drive.path)}
+                      onClick={() => setCurrentPath(drive)}
                   >
                     <HardDrive className="w-4 h-4 mr-2" />
-                    {drive.name}
+                    {drive}
                   </Button>
               ))}
             </div>
@@ -437,6 +469,27 @@ export function Sidebar({ currentPath, setCurrentPath, showHiddenFiles }: Sideba
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <div className="px-2 py-1 mb-2 flex flex-col">
+          <div 
+            className="flex items-center justify-between cursor-pointer p-1 hover:bg-accent rounded-md"
+            onClick={() => toggleExpanded("bookmarks")}
+          >
+            <span className="text-sm font-medium flex items-center">
+              {expanded.bookmarks ? <ChevronDown className="h-4 w-4 mr-1" /> : <ChevronRight className="h-4 w-4 mr-1" />}
+              {t("bookmarks")}
+            </span>
+          </div>
+          
+          {expanded.bookmarks && (
+            <div className="mt-1">
+              <BookmarkManager 
+                onNavigate={navigateTo} 
+                currentPath={currentPath} 
+              />
+            </div>
+          )}
+        </div>
       </div>
   )
 }

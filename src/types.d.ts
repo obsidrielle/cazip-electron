@@ -16,6 +16,24 @@ interface FileInfo {
   accessed: Date;
 }
 
+// 书签定义
+interface Bookmark {
+  id: string;
+  name: string;
+  path: string;
+  type: "folder" | "file";
+  icon?: string;
+  color?: string;
+  timestamp: number;
+}
+
+// 书签分类
+interface BookmarkCategory {
+  id: string;
+  name: string;
+  bookmarks: Bookmark[];
+}
+
 // Electron API类型定义
 interface ElectronAPI {
   window: {
