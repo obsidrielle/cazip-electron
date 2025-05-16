@@ -21,6 +21,7 @@ interface FileListProps {
   moveSelectedToTop: boolean
   showHiddenFiles: boolean
   onContextMenu?: (e: React.MouseEvent, item: any) => void
+  onFileDoubleClick?: (file: any) => void
 }
 
 export function FileList({
@@ -34,6 +35,7 @@ export function FileList({
                            moveSelectedToTop,
                            showHiddenFiles,
                            onContextMenu,
+                           onFileDoubleClick,
                          }: FileListProps) {
   const { t } = useTranslation()
   const [sortColumn, setSortColumn] = useState<string>("name")
@@ -135,9 +137,15 @@ export function FileList({
   }
 
   const handleDoubleClick = (file: any) => {
+    // 如果提供了自定义双击处理函数，则优先调用它
+    if (onFileDoubleClick) {
+      onFileDoubleClick(file)
+      return
+    }
+    
+    // 默认行为：导航到文件夹或打开压缩文件
     if (file.type === "folder") {
       onNavigate(file.path)
-      files = []
     } else {
       const extension = file.name.split(".").pop()?.toLowerCase()
       if (

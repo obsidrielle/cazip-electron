@@ -30,9 +30,13 @@ import { themes } from "@/lib/themes"
 import { compressionService } from "./services/compression-service"
 import path from "path-browserify"
 import { NewFileDialog } from "./components/new-file-dialog"
+import { RenameDialog } from "./components/rename-dialog"
 import { commandService } from "./services/command-service"
 import { ContextMenu } from "./components/context-menu"
 import XTerminal from "@/src/components/console/Xterm";
+import { Toast, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from "./components/ui/toast"
+import { useToast } from "./components/ui/use-toast"
+import { FilePreviewDialog } from "./components/file-preview-dialog"
 
 interface Tab {
   id: string
@@ -83,6 +87,12 @@ export default function App() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [showHiddenFiles, setShowHiddenFiles] = useState(false)
   const [isNewFileDialogOpen, setIsNewFileDialogOpen] = useState(false)
+  const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false)
+  const [fileToRename, setFileToRename] = useState<string>("")
+  const [clipboard, setClipboard] = useState<{
+    files: string[],
+    operation: "copy" | "cut" | null
+  }>({ files: [], operation: null })
   const [contextMenuProps, setContextMenuProps] = useState<{
     show: boolean
     x: number
@@ -98,6 +108,8 @@ export default function App() {
   const [isArchiveViewerOpen, setIsArchiveViewerOpen] = useState(false)
   const [archiveViewerPath, setArchiveViewerPath] = useState<string>("")
   const [selectedArchiveFiles, setSelectedArchiveFiles] = useState<string[]>([])
+  const [isPreviewDialogOpen, setIsPreviewDialogOpen] = useState(false)
+  const [fileToPreview, setFileToPreview] = useState<string>("")
 
   // Get selected files from the active tab
   const getSelectedFiles = useCallback(() => {
@@ -469,12 +481,203 @@ export default function App() {
     setIsExtractDialogOpen(true)
   }
 
-  // Close archive viewer
-  // const handleCloseArchiveViewer = () => {
-  //   setIsArchiveViewerOpen(false)
-  //   setArchiveViewerPath("")
-  //   setSelectedArchiveFiles([])
-  // }
+  // 处理文件复制
+  const handleCopy = useCallback(() => {
+    const selectedFiles = getSelectedFiles()
+    if (selectedFiles.length > 0) {
+      setClipboard({
+        files: selectedFiles,
+        operation: "copy"
+      })
+      // 添加到控制台日志
+      if (consoleLogs) {
+        setConsoleLogs([...consoleLogs, `📋 ${t("fileCopied")}: ${selectedFiles.length} ${t("filesSelected")}`])
+      }
+    }
+  }, [getSelectedFiles, consoleLogs, t])
+
+  // 处理文件剪切
+  const handleCut = useCallback(() => {
+    const selectedFiles = getSelectedFiles()
+    if (selectedFiles.length > 0) {
+      setClipboard({
+        files: selectedFiles,
+        operation: "cut"
+      })
+      // 添加到控制台日志
+      if (consoleLogs) {
+        setConsoleLogs([...consoleLogs, `✂️ ${t("fileMoved")}: ${selectedFiles.length} ${t("filesSelected")}`])
+      }
+    }
+  }, [getSelectedFiles, consoleLogs, t])
+
+  // 处理文件粘贴
+  const handlePaste = useCallback(async () => {
+    if (clipboard.files.length === 0 || !clipboard.operation) return
+    
+    try {
+      // 在控制台日志中添加开始操作的消息
+      const action = clipboard.operation === "copy" ? "复制" : "移动"
+      setConsoleLogs([...consoleLogs, `🔄 ${action}文件中...`])
+      
+      for (const filePath of clipboard.files) {
+        const fileName = path.basename(filePath)
+        const destinationPath = path.join(currentPath, fileName)
+        
+        // 检查目标路径是否已存在
+        const exists = await window.electron.fs.fileExists(destinationPath)
+        
+        if (exists && filePath !== destinationPath) {
+          // 可以添加覆盖确认对话框，这里简单处理为自动重命名
+          const extension = path.extname(fileName)
+          const baseName = path.basename(fileName, extension)
+          const newFileName = `${baseName}_copy${extension}`
+          const newDestinationPath = path.join(currentPath, newFileName)
+          
+          if (clipboard.operation === "copy") {
+            await window.electron.fs.copyFile(filePath, newDestinationPath)
+          } else {
+            await window.electron.fs.moveFile(filePath, newDestinationPath)
+          }
+        } else if (filePath !== destinationPath) { // 防止在相同位置粘贴
+          if (clipboard.operation === "copy") {
+            await window.electron.fs.copyFile(filePath, destinationPath)
+          } else {
+            await window.electron.fs.moveFile(filePath, destinationPath)
+          }
+        }
+      }
+      
+      // 如果是剪切操作，清空剪贴板
+      if (clipboard.operation === "cut") {
+        setClipboard({ files: [], operation: null })
+      }
+      
+      // 刷新当前目录
+      loadFiles(currentPath)
+      
+      // 添加到控制台日志
+      const successMessage = clipboard.operation === "copy" 
+        ? `✅ ${t("fileCopied")}: ${clipboard.files.length} ${t("filesSelected")}`
+        : `✅ ${t("fileMoved")}: ${clipboard.files.length} ${t("filesSelected")}`
+      setConsoleLogs([...consoleLogs, successMessage])
+    } catch (error) {
+      console.error("Error pasting files:", error)
+      
+      // 添加错误消息到控制台日志
+      const errorMessage = clipboard.operation === "copy" 
+        ? `❌ ${t("errorCopyingFile")}: ${error.message}`
+        : `❌ ${t("errorMovingFile")}: ${error.message}`
+      setConsoleLogs([...consoleLogs, errorMessage])
+    }
+  }, [clipboard, currentPath, consoleLogs, t])
+
+  // 处理文件重命名
+  const handleOpenRenameDialog = useCallback((filePath) => {
+    setFileToRename(filePath)
+    setIsRenameDialogOpen(true)
+  }, [])
+
+  // 执行文件重命名
+  const handleRenameFile = async (oldPath, newName) => {
+    try {
+      const directoryPath = path.dirname(oldPath)
+      const newPath = path.join(directoryPath, newName)
+      
+      // 检查新文件名是否已存在
+      const exists = await window.electron.fs.fileExists(newPath)
+      if (exists && oldPath !== newPath) {
+        throw new Error(t("fileAlreadyExists"))
+      }
+      
+      await window.electron.fs.moveFile(oldPath, newPath)
+      
+      // 刷新文件列表
+      loadFiles(currentPath)
+      
+      // 添加到控制台日志
+      setConsoleLogs([...consoleLogs, `✅ ${t("fileRenamed")}: ${path.basename(oldPath)} → ${newName}`])
+      
+      return true
+    } catch (error) {
+      console.error("Error renaming file:", error)
+      throw error
+    }
+  }
+
+  // 处理上下文菜单中的文件操作
+  const handleContextMenuRename = useCallback(() => {
+    if (contextMenuProps.item) {
+      handleOpenRenameDialog(contextMenuProps.item.path)
+      closeContextMenu()
+    }
+  }, [contextMenuProps.item, handleOpenRenameDialog, closeContextMenu])
+
+  const handleContextMenuCopy = useCallback(() => {
+    if (contextMenuProps.item) {
+      setClipboard({
+        files: [contextMenuProps.item.path],
+        operation: "copy"
+      })
+      // 添加到控制台日志
+      setConsoleLogs([...consoleLogs, `📋 ${t("fileCopied")}: ${contextMenuProps.item.name}`])
+      closeContextMenu()
+    }
+  }, [contextMenuProps.item, consoleLogs, t, closeContextMenu])
+
+  const handleContextMenuCut = useCallback(() => {
+    if (contextMenuProps.item) {
+      setClipboard({
+        files: [contextMenuProps.item.path],
+        operation: "cut"
+      })
+      // 添加到控制台日志
+      setConsoleLogs([...consoleLogs, `✂️ ${t("fileMoved")}: ${contextMenuProps.item.name}`])
+      closeContextMenu()
+    }
+  }, [contextMenuProps.item, consoleLogs, t, closeContextMenu])
+
+  const handleContextMenuDelete = useCallback(() => {
+    if (contextMenuProps.item) {
+      // 更新选中文件为上下文菜单项
+      updateSelectedFiles([contextMenuProps.item.path])
+      // 打开删除确认对话框
+      setIsDeleteDialogOpen(true)
+      closeContextMenu()
+    }
+  }, [contextMenuProps.item, updateSelectedFiles, closeContextMenu])
+
+  // 处理文件预览
+  const handlePreviewFile = useCallback((filePath: string) => {
+    setFileToPreview(filePath)
+    setIsPreviewDialogOpen(true)
+  }, [])
+
+  // 处理文件双击
+  const handleFileDoubleClick = useCallback((file: any) => {
+    if (file.type === "folder") {
+      // 导航到文件夹
+      handlePathChange(file.path)
+    } else {
+      // 检查是否为存档文件
+      const isArchiveFile = isArchive(file.name)
+      if (isArchiveFile) {
+        // 打开存档查看器
+        handleOpenArchive(file.path)
+      } else {
+        // 尝试预览文件
+        handlePreviewFile(file.path)
+      }
+    }
+  }, [handlePathChange, handleOpenArchive, handlePreviewFile, isArchive])
+
+  // 在上下文菜单中添加预览选项
+  const handleContextMenuPreview = useCallback(() => {
+    if (contextMenuProps.item && contextMenuProps.item.type !== "folder") {
+      handlePreviewFile(contextMenuProps.item.path)
+      closeContextMenu()
+    }
+  }, [contextMenuProps.item, handlePreviewFile, closeContextMenu])
 
   return (
       <ThemeProvider
@@ -514,6 +717,12 @@ export default function App() {
                   onRefresh={handleRefresh}
                   onDeselectAll={handleDeselectAll}
                   onDelete={handleDelete}
+                  onAddFiles={() => setIsCompressDialogOpen(true)}
+                  onCopy={handleCopy}
+                  onCut={handleCut}
+                  onPaste={handlePaste}
+                  canPaste={clipboard.files.length > 0}
+                  selectedFilesCount={getSelectedFiles().length}
               />
 
               {isArchiveViewerOpen ? (
@@ -535,6 +744,7 @@ export default function App() {
                       moveSelectedToTop={config.moveSelectedToTop}
                       showHiddenFiles={showHiddenFiles}
                       onContextMenu={handleContextMenu}
+                      onFileDoubleClick={handleFileDoubleClick}
                   />
               )}
             </div>
@@ -614,23 +824,41 @@ export default function App() {
             </AlertDialogContent>
           </AlertDialog>
 
-          {contextMenuProps.show && contextMenuProps.item && (
+          {contextMenuProps.show && (
               <ContextMenu
                   x={contextMenuProps.x}
                   y={contextMenuProps.y}
                   item={contextMenuProps.item}
                   onClose={closeContextMenu}
-                  isArchive={isArchive(contextMenuProps.item.name)}
+                  isArchive={contextMenuProps.item ? isArchive(contextMenuProps.item.name) : false}
                   onExtractToCurrentPath={() => {
-                    closeContextMenu()
                     handleExtractToCurrentPath(contextMenuProps.item.path)
+                    closeContextMenu()
                   }}
                   onExtractToSpecifiedPath={() => {
-                    closeContextMenu()
                     handleExtractToSpecifiedPath(contextMenuProps.item.path)
+                    closeContextMenu()
                   }}
+                  onCopy={handleContextMenuCopy}
+                  onCut={handleContextMenuCut}
+                  onRename={handleContextMenuRename}
+                  onDelete={handleContextMenuDelete}
+                  onPreview={handleContextMenuPreview}
               />
           )}
+
+          <RenameDialog
+              isOpen={isRenameDialogOpen}
+              onClose={() => setIsRenameDialogOpen(false)}
+              onRename={handleRenameFile}
+              filePath={fileToRename}
+          />
+          
+          <FilePreviewDialog
+              isOpen={isPreviewDialogOpen}
+              onClose={() => setIsPreviewDialogOpen(false)}
+              filePath={fileToPreview}
+          />
         </div>
       </ThemeProvider>
   )

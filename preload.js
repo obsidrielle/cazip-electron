@@ -20,6 +20,11 @@ contextBridge.exposeInMainWorld("electron", {
     deleteFile: (path) => ipcRenderer.invoke("fs:deleteFile", path),
     fileExists: (path) => ipcRenderer.invoke("fs:fileExists", path),
     createFile: (path) => ipcRenderer.invoke("fs:createFile", path),
+    copyFile: (sourcePath, destinationPath) => ipcRenderer.invoke("fs:copyFile", sourcePath, destinationPath),
+    moveFile: (sourcePath, destinationPath) => ipcRenderer.invoke("fs:moveFile", sourcePath, destinationPath),
+    getFileInfo: (path) => ipcRenderer.invoke("fs:getFileInfo", path),
+    readTextFile: (path) => ipcRenderer.invoke("fs:readTextFile", path),
+    readImageAsBase64: (path) => ipcRenderer.invoke("fs:readImageAsBase64", path),
   },
   os: {
     platform: os.platform(),
