@@ -133,5 +133,17 @@
   "noFilesInDirectory": "此目录中没有文件",
   "up": "向上",
   "files": "文件",
-  "andMore": "还有 {{count}} 个..."
+  "andMore": "还有 {{count}} 个...",
+  "runScript": "Run Script",
+  "executeScript": "Execute Python Script",
+  "scriptFile": "Script File",
+  "selectPythonScript": "Please select Python script file",
+  "virtualEnv": "Virtual Environment",
+  "selectVirtualEnv": "Optional: Select Python virtual environment directory",
+  "outputPath": "Output Path",
+  "selectOutputPath": "Select output path",
+  "unzipMode": "Unzip Mode (checked means extract, unchecked means compress)",
+  "execute": "Execute",
+  "processing": "Processing...",
+  "scriptExecutionFailed": "Script execution failed"
 }

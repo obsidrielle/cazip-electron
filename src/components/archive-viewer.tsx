@@ -44,6 +44,7 @@ interface ArchiveViewerProps {
     onExtract: (filePaths: string[]) => void
     config: {
         rustExecutablePath: string
+        logLevel: string
     }
 }
 
@@ -127,8 +128,8 @@ export function ArchiveViewer({ archivePath, onClose, onExtract, config }: Archi
             // 清除之前的日志
             commandService.clearLogs()
 
-            // 执行命令获取压缩包内容
-            const command = `${config.rustExecutablePath} -l -u ${archivePath}`
+            // 执行命令获取压缩包内容，使用新的子命令结构 "list" 或简写 "l"
+            const command = `${config.rustExecutablePath} ${config.logLevel === "debug" ? "--debug " : ""}list ${archivePath}`
             await commandService.executeCommand(command)
 
             // 获取日志并解析JSON

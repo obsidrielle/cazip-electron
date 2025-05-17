@@ -154,5 +154,17 @@
   "fileTooLargeForPreview": "文件太大，无法预览",
   "fileTypeNotSupported": "不支持此文件类型的预览",
   "previewTimeout": "预览加载超时",
-  "errorLoadingPreview": "加载预览时出错"
+  "errorLoadingPreview": "加载预览时出错",
+  "runScript": "执行脚本",
+  "executeScript": "执行Python脚本",
+  "scriptFile": "脚本文件",
+  "selectPythonScript": "请选择Python脚本文件",
+  "virtualEnv": "虚拟环境",
+  "selectVirtualEnv": "可选：选择Python虚拟环境目录",
+  "outputPath": "输出路径",
+  "selectOutputPath": "选择输出路径",
+  "unzipMode": "解压模式（勾选表示解压缩，不勾选表示压缩）",
+  "execute": "执行",
+  "processing": "处理中...",
+  "scriptExecutionFailed": "脚本执行失败"
 }

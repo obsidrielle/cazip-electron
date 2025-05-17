@@ -14,7 +14,8 @@ import {
   Copy, 
   Scissors, 
   ClipboardPaste,
-  FilePlus
+  FilePlus,
+  Code
 } from "lucide-react"
 import { Button } from "./ui/button"
 import { Separator } from "./ui/separator"
@@ -46,6 +47,7 @@ interface ToolbarProps {
   onOpenConfig?: () => void
   onToggleHiddenFiles?: () => void
   onNewFile?: () => void
+  onRunScript?: () => void
   selectedFilesCount: number
 }
 
@@ -64,6 +66,7 @@ export function Toolbar({
   onOpenConfig,
   onToggleHiddenFiles,
   onNewFile,
+  onRunScript,
   selectedFilesCount
 }: ToolbarProps) {
   const { t, i18n } = useTranslation()
@@ -128,6 +131,25 @@ export function Toolbar({
               </TooltipTrigger>
               <TooltipContent>
                 <p>{t("extract")}</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
+          
+          {onRunScript && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 transition-all duration-200 ease-in-out hover:bg-accent hover:text-accent-foreground"
+                  onClick={onRunScript}
+                  disabled={selectedFilesCount === 0}
+                >
+                  <Code className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{t("runScript")}</p>
               </TooltipContent>
             </Tooltip>
           )}

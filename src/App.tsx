@@ -37,6 +37,7 @@ import XTerminal from "@/src/components/console/Xterm";
 import { Toast, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from "./components/ui/toast"
 import { useToast } from "./components/ui/use-toast"
 import { FilePreviewDialog } from "./components/file-preview-dialog"
+import { ScriptDialog } from "./components/script-dialog"
 
 interface Tab {
   id: string
@@ -73,6 +74,7 @@ export default function App() {
   const [currentPath, setCurrentPath] = useState<string>("")
   const [isExtractDialogOpen, setIsExtractDialogOpen] = useState(false)
   const [isCompressDialogOpen, setIsCompressDialogOpen] = useState(false)
+  const [isScriptDialogOpen, setIsScriptDialogOpen] = useState(false)
   const [currentArchive, setCurrentArchive] = useState<string | null>(null)
   const [files, setFiles] = useState<any[]>([])
   const [isConsoleOpen, setIsConsoleOpen] = useState(true)
@@ -737,6 +739,14 @@ export default function App() {
     }
   }, [navigationHistory, currentPath, activeTab])
 
+  const handleRunScript = () => {
+    setIsScriptDialogOpen(true)
+  }
+
+  const handleScriptDialogClose = () => {
+    setIsScriptDialogOpen(false)
+  }
+
   return (
       <ThemeProvider
           attribute="class"
@@ -768,18 +778,18 @@ export default function App() {
               <Toolbar
                   onExtract={handleExtract}
                   onCompress={handleCompress}
-                  selectedFiles={getSelectedFiles()}
-                  currentArchive={currentArchive}
-                  onOpenConfig={handleOpenConfig}
                   onSearch={handleSearch}
-                  onRefresh={handleRefresh}
-                  onDeselectAll={handleDeselectAll}
-                  onDelete={handleDelete}
-                  onAddFiles={() => setIsCompressDialogOpen(true)}
+                  onRefresh={() => loadFiles(currentPath)}
+                  onDeselectAll={() => updateSelectedFiles([])}
+                  onDelete={() => setIsDeleteDialogOpen(true)}
+                  onOpenConfig={handleOpenConfig}
+                  onToggleHiddenFiles={toggleShowHiddenFiles}
+                  onNewFile={handleNewFile}
                   onCopy={handleCopy}
                   onCut={handleCut}
                   onPaste={handlePaste}
                   canPaste={clipboard.files.length > 0}
+                  onRunScript={handleRunScript}
                   selectedFilesCount={getSelectedFiles().length}
               />
 
@@ -916,6 +926,13 @@ export default function App() {
               isOpen={isPreviewDialogOpen}
               onClose={() => setIsPreviewDialogOpen(false)}
               filePath={fileToPreview}
+          />
+
+          <ScriptDialog
+              isOpen={isScriptDialogOpen}
+              onClose={handleScriptDialogClose}
+              selectedFiles={getSelectedFiles()}
+              config={config}
           />
         </div>
       </ThemeProvider>
