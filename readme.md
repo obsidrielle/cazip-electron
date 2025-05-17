@@ -9,3 +9,5 @@ CaZip 是一个基于 Electron 和 React 的压缩文件管理器。该软件的
 1. 安装依赖：`pnpm install`
 2. 进入 dev 模式: `pnpm electron:dev`
 3. 打包到目标 `pnpm electron:build:(win/mac/linux)`
+
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/obsidrielle/cazip-electron)
