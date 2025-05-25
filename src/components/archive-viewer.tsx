@@ -129,7 +129,8 @@ export function ArchiveViewer({ archivePath, onClose, onExtract, config }: Archi
             commandService.clearLogs()
 
             // 执行命令获取压缩包内容，使用新的子命令结构 "list" 或简写 "l"
-            const command = `${config.rustExecutablePath} ${config.logLevel === "debug" ? "--debug " : ""}list ${archivePath}`
+            // 使用引号包装文件路径以处理空格和特殊字符
+            const command = `${config.rustExecutablePath} ${config.logLevel === "debug" ? "--debug " : ""}list "${archivePath}"`
             await commandService.executeCommand(command)
 
             // 获取日志并解析JSON

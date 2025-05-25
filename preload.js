@@ -28,6 +28,35 @@ contextBridge.exposeInMainWorld("electron", {
   },
   os: {
     platform: os.platform(),
+    homedir: () => os.homedir(),
+    tmpdir: () => os.tmpdir(),
+    cwd: () => process.cwd(),
+    getPaths: () => {
+      const homeDir = os.homedir()
+      const platform = os.platform()
+      
+      const paths = {
+        home: homeDir,
+        desktop: require('path').join(homeDir, 'Desktop'),
+        documents: require('path').join(homeDir, 'Documents'),
+        downloads: require('path').join(homeDir, 'Downloads'),
+        pictures: require('path').join(homeDir, 'Pictures'),
+        music: require('path').join(homeDir, 'Music'),
+        videos: require('path').join(homeDir, 'Videos'),
+        tmp: os.tmpdir(),
+        root: platform === 'win32' ? 'C:\\' : '/',
+      }
+      
+      // Linux/Unix 特定路径
+      if (platform === 'linux' || platform === 'darwin') {
+        paths.usr = '/usr'
+        paths.opt = '/opt'
+        paths.var = '/var'
+        paths.etc = '/etc'
+      }
+      
+      return paths
+    }
   },
   // 添加终端相关 API
   terminal: {

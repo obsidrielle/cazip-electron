@@ -21,23 +21,12 @@ export class CommandService {
             this.logCallback(`$ ${command}`)
             this.logs.push(`$ ${command}`)
 
-            // 简单地分割命令为可执行文件和参数，不尝试处理引号
-            const parts = command.split(" ")
-            const executable = parts[0]
-            const args = parts.slice(1)
-
-            // 移除参数中的引号
-            const cleanArgs = args.map((arg) => {
-                // 如果参数以引号开始和结束，则移除引号
-                if ((arg.startsWith('"') && arg.endsWith('"')) || (arg.startsWith("'") && arg.endsWith("'"))) {
-                    return arg.substring(1, arg.length - 1)
-                }
-                return arg
-            })
+            // 智能解析命令，正确处理带引号的参数
+            const { executable, args } = this.parseCommand(command)
 
             return new Promise((resolve, reject) => {
-                // 不要在这里添加引号，让 childProcess.spawn 处理参数
-                const process = window.electron.childProcess.spawn(executable, cleanArgs)
+                // 使用解析后的参数直接传递给 spawn
+                const process = window.electron.childProcess.spawn(executable, args)
 
                 process.stdout.on("data", (data: string) => {
                     console.log(data)
@@ -50,14 +39,14 @@ export class CommandService {
                     this.logs.push(data)
                 })
 
-                process.on("close", (code: number) => {
+                process.on("close", (code: number | undefined) => {
                     if (code === 0) {
                         this.logCallback(`Command completed with code ${code}`)
                         this.logs.push(`Command completed with code ${code}`)
                         resolve(true)
                     } else {
-                        this.logCallback(`Command failed with code ${code}`)
-                        this.logs.push(`Command failed with code ${code}`)
+                        this.logCallback(`Command failed with code ${code || 'unknown'}`)
+                        this.logs.push(`Command failed with code ${code || 'unknown'}`)
                         resolve(false)
                     }
                 })
@@ -73,6 +62,45 @@ export class CommandService {
             this.logs.push(`Error executing command: ${error}`)
             return false
         }
+    }
+
+    // 智能命令解析器，正确处理引号
+    private parseCommand(command: string): { executable: string; args: string[] } {
+        const args: string[] = []
+        let current = ''
+        let inQuotes = false
+        let quoteChar = ''
+        
+        for (let i = 0; i < command.length; i++) {
+            const char = command[i]
+            
+            if (!inQuotes && (char === '"' || char === "'")) {
+                // 开始引号
+                inQuotes = true
+                quoteChar = char
+            } else if (inQuotes && char === quoteChar) {
+                // 结束引号
+                inQuotes = false
+                quoteChar = ''
+            } else if (!inQuotes && char === ' ') {
+                // 空格分隔符（不在引号内）
+                if (current.trim()) {
+                    args.push(current.trim())
+                    current = ''
+                }
+            } else {
+                // 普通字符
+                current += char
+            }
+        }
+        
+        // 添加最后一个参数
+        if (current.trim()) {
+            args.push(current.trim())
+        }
+        
+        const executable = args.shift() || ''
+        return { executable, args }
     }
 }
 

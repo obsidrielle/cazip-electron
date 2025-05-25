@@ -59,6 +59,21 @@ interface ElectronAPI {
   }
   os: {
     platform: string
+    homedir(): string
+    tmpdir(): string
+    cwd(): string
+    getPaths(): {
+      home: string
+      desktop: string
+      documents: string
+      downloads: string
+      pictures: string
+      music: string
+      videos: string
+      temp: string
+      appData?: string
+      userData?: string
+    }
   }
   terminal: {
     create(shell: string, dataCallback: (data: string) => void): Promise<boolean>

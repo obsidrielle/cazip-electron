@@ -125,7 +125,7 @@ ipcMain.handle("fs:readDirectory", async (event, dirPath) => {
     })
   } catch (error) {
     console.error("Error reading directory:", error)
-    return []
+    throw error
   }
 })
 

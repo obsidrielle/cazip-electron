@@ -1,82 +1,24 @@
 "use client"
 
-import type React from "react"
-
-import { useState, useEffect, useRef, type KeyboardEvent, useMemo } from "react"
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useTranslation } from "react-i18next"
-import { Terminal, Trash2, Send, Copy, Download, X, ChevronUp, ChevronDown, Moon, Sun } from "lucide-react"
+import { Terminal, Trash2, Send, Copy, Download, Pause, Play, ChevronDown, ArrowUp } from "lucide-react"
 import { Button } from "./ui/button"
 import { ScrollArea } from "./ui/scroll-area"
 import { Input } from "./ui/input"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs"
-import { useTheme } from "next-themes"
-import ansiToHTML from 'ansi-to-html'
-
-// ANSI converter
-const ansiConverter = new ansiToHTML({
-  newline: true,
-  escapeXML: true,
-  colors: {
-    0: '#000000', // black
-    1: '#ff0000', // red
-    2: '#00ff00', // green
-    3: '#ffff00', // yellow
-    4: '#0000ff', // blue
-    5: '#ff00ff', // magenta
-    6: '#00ffff', // cyan
-    7: '#ffffff', // white
-    8: '#808080', // gray
-    9: '#ff8080', // light red
-    10: '#80ff80', // light green
-    11: '#ffff80', // light yellow
-    12: '#8080ff', // light blue
-    13: '#ff80ff', // light magenta
-    14: '#80ffff', // light cyan
-    15: '#ffffff'  // bright white
-  }
-})
-
-// Helper function to convert ANSI escape sequences to HTML
-const convertAnsiToHTML = (text) => {
-  if (!text) return ''
-
-  // Process ANSI escape sequences
-  try {
-    return ansiConverter.toHtml(text)
-  } catch (e) {
-    console.error('Error converting ANSI to HTML:', e)
-    return text
-  }
-}
-
-// 控制台主题类型
-type ConsoleTheme = "system" | "dark" | "light"
+import { Badge } from "./ui/badge"
+import { Separator } from "./ui/separator"
 
 // 日志条目类型
 interface LogEntry {
-  id: number
-  timestamp: string
-  type: "info" | "error" | "warning" | "success" | "command" | "result"
-  text: string
-  html?: string // Added HTML version of text with ANSI codes converted
-  isNew: boolean
+  id: string
+  timestamp: Date
+  level: "info" | "error" | "warning" | "success" | "command" | "output"
+  message: string
+  indent?: number
 }
 
-// 命令历史记录条目
-interface CommandHistoryEntry {
-  command: string
-  timestamp: string
-}
-
-// 常用命令列表（用于自动补全）
-const COMMON_COMMANDS = [
-  "ls", "cd", "mkdir", "rm", "cp", "mv", "cat", "grep", "find", "pwd",
-  "clear", "echo", "touch", "chmod", "chown", "tar", "zip", "unzip", "ps",
-  "kill", "df", "du", "free", "top", "ssh", "scp", "wget", "curl", "ping",
-  "apt-get", "apt", "yum", "npm", "git", "node", "python", "docker", "help"
-]
-
-// 控制台属性接口
+// 控制台属性
 interface ConsoleProps {
   isOpen: boolean
   onToggle: () => void
@@ -86,564 +28,721 @@ interface ConsoleProps {
   onRefresh?: () => void
 }
 
-export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand, onRefresh }: ConsoleProps) {
+// 日志级别颜色映射
+const LOG_LEVEL_COLORS = {
+  info: "text-blue-400",
+  error: "text-red-400", 
+  warning: "text-yellow-400",
+  success: "text-green-400",
+  command: "text-purple-400",
+  output: "text-gray-300"
+}
+
+// 日志级别标签
+const LOG_LEVEL_BADGES = {
+  info: "INFO",
+  error: "ERR",
+  warning: "WARN", 
+  success: "OK",
+  command: "CMD",
+  output: "OUT"
+}
+
+export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand }: ConsoleProps) {
   const { t } = useTranslation()
-  const { theme: systemTheme, setTheme: setSystemTheme } = useTheme() // 获取系统主题
-  const scrollAreaRef = useRef<HTMLDivElement>(null)
-  const [enhancedLogs, setEnhancedLogs] = useState<LogEntry[]>([])
+  
+  // 状态管理
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([])
   const [commandInput, setCommandInput] = useState("")
-  const [commandHistory, setCommandHistory] = useState<CommandHistoryEntry[]>([])
+  const [commandHistory, setCommandHistory] = useState<string[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
-  const [activeTab, setActiveTab] = useState("terminal")
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [consoleHeight, setConsoleHeight] = useState(300) // 增加默认高度
+  const [isPaused, setIsPaused] = useState(false)
+  const [consoleHeight, setConsoleHeight] = useState(400)
   const [isDragging, setIsDragging] = useState(false)
-  const [theme, setTheme] = useState<ConsoleTheme>((systemTheme as ConsoleTheme) || "system")
+  const [filter, setFilter] = useState("")
+  const [selectedLevel, setSelectedLevel] = useState<string>("all")
+  const [processedLogsCount, setProcessedLogsCount] = useState(0) // 跟踪已处理的日志数量
+  
+  // 新增：当前工作目录和自动补全状态
+  const [currentWorkingDir, setCurrentWorkingDir] = useState<string>(() => {
+    // 使用 Electron 提供的真实系统路径
+    try {
+      console.log('🔧 Initializing current working directory...') // 调试日志
+      
+      if (typeof window !== 'undefined' && (window.electron as any)?.os?.cwd) {
+        const cwd = (window.electron as any).os.cwd()
+        console.log('📂 Got CWD from Electron:', cwd) // 调试日志
+        
+        // 检查路径是否有效
+        if (cwd && typeof cwd === 'string' && !cwd.includes('??') && !cwd.includes('undefined')) {
+          return cwd
+        } else {
+          console.warn('⚠️ Invalid CWD, trying homedir...') // 调试日志
+        }
+      }
+      
+      if (typeof window !== 'undefined' && (window.electron as any)?.os?.homedir) {
+        const homedir = (window.electron as any).os.homedir()
+        console.log('🏠 Got homedir from Electron:', homedir) // 调试日志
+        
+        // 检查路径是否有效
+        if (homedir && typeof homedir === 'string' && !homedir.includes('??') && !homedir.includes('undefined')) {
+          return homedir
+        } else {
+          console.warn('⚠️ Invalid homedir, using fallback...') // 调试日志
+        }
+      }
+      
+      console.log('🔄 Using fallback directory: /home/user') // 调试日志
+      return "/home/user"
+    } catch (error) {
+      console.error('❌ Error initializing working directory:', error) // 调试日志
+      return "/home/user"
+    }
+  })
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
-  const [selectedSuggestion, setSelectedSuggestion] = useState(0)
-  const [isFullscreen, setIsFullscreen] = useState(false)
-  const [fontSize, setFontSize] = useState(14) // 添加字体大小设置
-  const [isVisible, setIsVisible] = useState(true)
-  const [isCopied, setIsCopied] = useState(false)
-  const [userHasScrolled, setUserHasScrolled] = useState(false) // 跟踪用户是否滚动
-
-  // 记录时间戳
-  const getTimestamp = () => {
-    const now = new Date()
-    return now.toLocaleTimeString()
-  }
-
-  // 清除日志
-  function handleClearLogs() {
-    if (onClear) {
-      onClear()
-      setEnhancedLogs([])
+  const [selectedSuggestion, setSelectedSuggestion] = useState(-1)
+  
+  // Refs
+  const scrollAreaRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const logContainerRef = useRef<HTMLDivElement>(null)
+  
+  // 添加日志的辅助函数
+  const addLog = useCallback((message: string, level: LogEntry["level"] = "info") => {
+    const logEntry: LogEntry = {
+      id: `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: new Date(),
+      level,
+      message
     }
-  }
-
-  // 解析日志行
-  const parseLogLine = (line: string): { timestamp?: string, restContent: string } => {
-    // 先清理可能的双重时间戳
-    let cleanedLine = line;
-
-    // 匹配格式为 [18:30:06] 18:30:06: 的双时间戳
-    const doubleTimestampRegex = /^\[(\d{2}:\d{2}:\d{2})\]\s*(\d{2}:\d{2}:\d{2}):/;
-    if (doubleTimestampRegex.test(cleanedLine)) {
-      // 只保留第一个时间戳
-      cleanedLine = cleanedLine.replace(doubleTimestampRegex, '[$1]');
-    }
-
-    // 匹配单个时间戳格式，如 [18:18:22]
-    const timeMatch = cleanedLine.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*/);
-    if (timeMatch) {
-      return {
-        timestamp: timeMatch[1],
-        restContent: cleanedLine.substring(timeMatch[0].length)
-      };
-    }
-
-    // 匹配没有方括号的时间戳，如 18:18:22:
-    const plainTimeMatch = cleanedLine.match(/^(\d{2}:\d{2}:\d{2}):\s*/);
-    if (plainTimeMatch) {
-      return {
-        timestamp: plainTimeMatch[1],
-        restContent: cleanedLine.substring(plainTimeMatch[0].length)
-      };
-    }
-
-    return { restContent: cleanedLine };
-  }
-
-  // 清理ANSI转义序列以在纯文本中显示
-  const stripAnsiCodes = (text) => {
-    if (!text) return text;
-
-    // 移除所有ANSI转义序列
-    return text.replace(/\u001b\[\d+(;\d+)*m/g, '');
-  }
-
-  // 格式化日志文本（添加语法高亮）
-  const formatLogText = (text: string) => {
-    if (!text) return text;
-
-    // 检查并清理双重时间戳
-    let cleanedText = text;
-
-    // 匹配格式为 [18:30:06] 18:30:06: 的双时间戳模式
-    const doubleTimestampRegex = /^\[(\d{2}:\d{2}:\d{2})\]\s*(\d{2}:\d{2}:\d{2}):/;
-    if (doubleTimestampRegex.test(cleanedText)) {
-      // 只保留第一个时间戳，删除第二个
-      cleanedText = cleanedText.replace(doubleTimestampRegex, '[' + '$1' + ']:');
-    }
-
-    // 匹配格式为 18:30:06: 的独立时间戳（没有方括号的）
-    const singleTimestampRegex = /^(\d{2}:\d{2}:\d{2}):/;
-    if (singleTimestampRegex.test(cleanedText)) {
-      // 删除这个时间戳
-      cleanedText = cleanedText.replace(singleTimestampRegex, '');
-    }
-
-    // 判断是否是时间戳格式 [18:18:22]
-    const timeMatch = cleanedText.match(/^\[(\d{2}:\d{2}:\d{2})\]/);
-    if (timeMatch) {
-      // 对时间戳进行着色
-      const timestamp = timeMatch[0];
-      const restText = cleanedText.substring(timestamp.length);
-      return <><span className="text-cyan-400">{timestamp}</span>{formatLogText(restText)}</>;
-    }
-
-    // 高亮文件名和路径
-    if (cleanedText.match(/\.([a-zA-Z0-9]+)($|\s|:)/)) {
-      const parts = [];
-      let lastIndex = 0;
-      const regex = /([a-zA-Z0-9_\-/.]+\.[a-zA-Z0-9]{1,10})($|\s|:|,)/g;
-      let match;
-
-      while ((match = regex.exec(cleanedText)) !== null) {
-        // 添加匹配前的文本
-        if (match.index > lastIndex) {
-          parts.push(cleanedText.substring(lastIndex, match.index));
+    setLogEntries(prev => [...prev, logEntry])
+  }, [])
+  
+  // 路径规范化函数
+  const normalizePath = useCallback((path: string): string => {
+    // 处理空路径
+    if (!path || path === '.') return '.'
+    
+    // 分割路径为组件
+    const parts = path.split('/').filter(part => part !== '' && part !== '.')
+    const normalizedParts: string[] = []
+    const isAbsolute = path.startsWith('/')
+    
+    for (const part of parts) {
+      if (part === '..') {
+        // 处理 .. (上级目录)
+        if (normalizedParts.length > 0 && normalizedParts[normalizedParts.length - 1] !== '..') {
+          normalizedParts.pop()
+        } else if (!isAbsolute) {
+          // 只有在相对路径时才保留 ..
+          normalizedParts.push('..')
         }
-
-        // 添加文件名，使用高亮
-        parts.push(<span key={match.index} className="text-yellow-400">{match[1]}</span>);
-        parts.push(match[2]);
-
-        lastIndex = match.index + match[0].length;
-      }
-
-      // 添加剩余文本
-      if (lastIndex < cleanedText.length) {
-        parts.push(cleanedText.substring(lastIndex));
-      }
-
-      return <>{parts}</>;
-    }
-
-    // 高亮"Command completed with code X"
-    if (cleanedText.includes("Command completed with code")) {
-      const parts = cleanedText.split(/(Command completed with code\s+)(\d+)/);
-      if (parts.length >= 4) {
-        return (
-            <>
-              {parts[0]}
-              <span className="text-blue-400">{parts[1]}</span>
-              <span className={parts[2] === "0" ? "text-green-400" : "text-red-400"}>{parts[2]}</span>
-              {parts.slice(3).join('')}
-            </>
-        );
+        // 绝对路径中的 .. 在根目录时被忽略
+      } else {
+        normalizedParts.push(part)
       }
     }
-
-    // 高亮 $ 命令前缀
-    if (cleanedText.trim().startsWith("$")) {
-      const parts = cleanedText.split(/(\$\s*)/);
-      if (parts.length >= 3) {
-        return (
-            <>
-              <span className="text-green-400 font-bold">{parts[1]}</span>
-              {parts.slice(2).join('')}
-            </>
-        );
-      }
+    
+    // 重建路径
+    let result = isAbsolute ? '/' : ''
+    result += normalizedParts.join('/')
+    
+    // 处理特殊情况
+    if (result === '' && !isAbsolute) {
+      result = '.'
+    } else if (result === '') {
+      result = '/'
     }
-
-    return cleanedText;
-  }
-
-  // 同步系统主题变化
-  useEffect(() => {
-    // 初始化时使用系统主题
-    if (systemTheme && theme === "system") {
-      // 应用系统主题到控制台
-      // 如果是自定义主题，这里不需要操作
+    
+    return result
+  }, [])
+  
+  // 解析绝对路径
+  const resolvePath = useCallback((path: string, basePath: string = currentWorkingDir): string => {
+    if (path.startsWith('/')) {
+      // 已经是绝对路径，直接规范化
+      return normalizePath(path)
     }
-  }, [systemTheme, theme]);
-
-  // 解析和处理原始日志
-  useEffect(() => {
-    if (logs.length > 0) {
-      // 收集来自同一组命令的日志行
-      const groupedLogs: { [key: string]: string[] } = {};
-      let currentGroup = '';
-
-      logs.forEach(log => {
-        // 清理双重时间戳（格式如 [18:30:06] 18:30:06: ）
-        let cleanedLog = log;
-
-        // 检测是否包含ANSI转义序列
-        const containsAnsi = /\u001b\[\d+(;\d+)*m/.test(cleanedLog);
-
-        // 匹配第一种模式：[时间] 时间:
-        const doubleTimePattern = /^\[(\d{2}:\d{2}:\d{2})\]\s+(\d{2}:\d{2}:\d{2}):/;
-        if (doubleTimePattern.test(cleanedLog)) {
-          cleanedLog = cleanedLog.replace(doubleTimePattern, '[$1]:');
-        }
-
-        // 匹配第二种模式：时间: $
-        const commandTimePattern = /^(\d{2}:\d{2}:\d{2}):\s+\$/;
-        if (commandTimePattern.test(cleanedLog)) {
-          cleanedLog = cleanedLog.replace(commandTimePattern, '$');
-        }
-
-        // 匹配第三种模式：时间: 其他文本
-        const generalTimePattern = /^(\d{2}:\d{2}:\d{2}):\s+/;
-        if (generalTimePattern.test(cleanedLog)) {
-          cleanedLog = cleanedLog.replace(generalTimePattern, '');
-        }
-
-        // 检查是否是新命令的开始（通常以时间戳开头）
-        const timeMatch = cleanedLog.match(/^\[(\d{2}:\d{2}:\d{2})\]/);
-
-        if (timeMatch) {
-          currentGroup = timeMatch[1];
-          if (!groupedLogs[currentGroup]) {
-            groupedLogs[currentGroup] = [];
-          }
-        }
-
-        if (currentGroup) {
-          groupedLogs[currentGroup].push(cleanedLog);
-        } else {
-          // 如果没有当前组，创建一个默认组
-          const defaultGroup = 'default';
-          if (!groupedLogs[defaultGroup]) {
-            groupedLogs[defaultGroup] = [];
-          }
-          groupedLogs[defaultGroup].push(cleanedLog);
-        }
-      });
-
-      // 创建增强日志条目
-      const newEnhancedLogs: LogEntry[] = [];
-
-      Object.entries(groupedLogs).forEach(([group, groupLogs], groupIndex) => {
-        groupLogs.forEach((log, logIndex) => {
-          // 判断日志类型
-          let type: LogEntry["type"] = "info";
-
-          // 去除ANSI转义序列后的文本，用于类型判断
-          const plainText = stripAnsiCodes(log);
-
-          if (plainText.toLowerCase().includes("error") || plainText.toLowerCase().includes("失败")) {
-            type = "error";
-          } else if (plainText.toLowerCase().includes("warning") || plainText.toLowerCase().includes("警告")) {
-            type = "warning";
-          } else if (plainText.toLowerCase().includes("success") || plainText.toLowerCase().includes("成功")) {
-            type = "success";
-          } else if (plainText.includes("$")) {
-            type = "command";
-          } else if (plainText.startsWith(">")) {
-            type = "result";
-          } else if (plainText.includes("Command completed with code 0")) {
-            type = "success";
-          } else if (plainText.includes("Command completed with code") && !plainText.includes("Command completed with code 0")) {
-            type = "error";
-          }
-
-          // 解析时间戳
-          const { timestamp, restContent } = parseLogLine(log);
-
-          // 转换ANSI转义序列为HTML
-          const html = convertAnsiToHTML(log);
-
-          const newLog: LogEntry = {
-            id: Date.now() + groupIndex * 1000 + logIndex,
-            timestamp: timestamp || group !== 'default' ? group : getTimestamp(),
-            type,
-            text: log,
-            html: html, // 保存带有HTML标签的文本
-            isNew: !enhancedLogs.some(oldLog => oldLog.text === log)
-          };
-
-          // 检查是否已存在相同内容的日志
-          if (!newEnhancedLogs.some(l => l.text === log) &&
-              !enhancedLogs.some(l => l.text === log)) {
-            newEnhancedLogs.push(newLog);
-          }
-        });
-      });
-
-      // 合并新旧日志，避免重复
-      const combinedLogs = [...enhancedLogs, ...newEnhancedLogs];
-
-      // 去重
-      const uniqueLogs = combinedLogs.filter((log, index, self) =>
-          index === self.findIndex(l => l.text === log.text)
-      );
-
-      setEnhancedLogs(uniqueLogs);
-
-      // 动画结束后移除新标记
-      if (newEnhancedLogs.some(log => log.isNew)) {
-        const timer = setTimeout(() => {
-          setEnhancedLogs(prev => prev.map(log => ({ ...log, isNew: false })));
-        }, 1000);
-
-        return () => clearTimeout(timer);
-      }
+    
+    // 相对路径，与基础路径合并
+    const combinedPath = basePath.endsWith('/') 
+      ? basePath + path 
+      : basePath + '/' + path
+    
+    return normalizePath(combinedPath)
+  }, [currentWorkingDir, normalizePath])
+  
+  // 解析单条日志
+  const parseLogEntry = useCallback((rawLog: string, index: number): LogEntry => {
+    const id = `log-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`
+    const timestamp = new Date()
+    
+    // 清理ANSI转义序列，但保留空格和缩进
+    let message = rawLog.replace(/\u001b\[[0-9;]*m/g, '')
+    
+    // 检测缩进级别（用于视觉层次）
+    let indent = 0
+    const indentMatch = message.match(/^(\s+)/)
+    if (indentMatch) {
+      indent = Math.floor(indentMatch[1].length / 2) // 每2个空格为一级缩进
     }
-  }, [logs]);
-
-  // 自动滚动到底部（添加控制）
-  useEffect(() => {
-    if (isOpen && scrollAreaRef.current && enhancedLogs.length > 0) {
-      const scrollContainer = scrollAreaRef.current.querySelector("[data-radix-scroll-area-viewport]");
-
-      if (scrollContainer) {
-        // 只有在用户没有手动滚动时，才自动滚动到底部
-        if (!userHasScrolled) {
-          scrollContainer.scrollTop = scrollContainer.scrollHeight;
-        }
-      }
+    
+    // 不要移除前导空格，保留原始格式
+    // message = message.trim() // 删除这行，保留缩进
+    
+    // 只移除尾部空格
+    message = message.trimEnd()
+    
+    // 检测日志级别
+    let level: LogEntry["level"] = "info"
+    const trimmedMessage = message.trim() // 用于级别检测的临时变量
+    if (trimmedMessage.startsWith('$') || trimmedMessage.includes('Command:')) {
+      level = "command"
+    } else if (trimmedMessage.toLowerCase().includes('error') || trimmedMessage.toLowerCase().includes('failed')) {
+      level = "error"
+    } else if (trimmedMessage.toLowerCase().includes('warning') || trimmedMessage.toLowerCase().includes('warn')) {
+      level = "warning"
+    } else if (trimmedMessage.toLowerCase().includes('success') || trimmedMessage.toLowerCase().includes('completed')) {
+      level = "success"
+    } else if (trimmedMessage.startsWith('>') || trimmedMessage.includes('Output:')) {
+      level = "output"
     }
-  }, [enhancedLogs, isOpen, userHasScrolled]);
-
-  // 监听滚动事件
-  useEffect(() => {
-    if (isOpen && scrollAreaRef.current) {
-      const scrollContainer = scrollAreaRef.current.querySelector("[data-radix-scroll-area-viewport]");
-
-      if (scrollContainer) {
-        // 检测用户滚动事件
-        const handleScroll = () => {
-          if (scrollContainer) {
-            const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-            // 如果用户向上滚动超过20px，标记为用户已滚动
-            if (scrollHeight - scrollTop - clientHeight > 20) {
-              setUserHasScrolled(true);
-            }
-
-            // 如果用户滚动到底部附近，重置标记
-            if (scrollHeight - scrollTop - clientHeight < 5) {
-              setUserHasScrolled(false);
-            }
-          }
-        };
-
-        // 添加滚动事件监听器
-        scrollContainer.addEventListener('scroll', handleScroll);
-
-        return () => {
-          scrollContainer.removeEventListener('scroll', handleScroll);
-        };
-      }
-    }
-  }, [isOpen]);
-
-  // 选择激活标签时聚焦输入框
-  useEffect(() => {
-    if (activeTab === "terminal" && isOpen && inputRef.current) {
-      inputRef.current.focus()
-    }
-  }, [activeTab, isOpen])
-
-  // 处理鼠标拖动事件
-  const startDragging = (e: React.MouseEvent) => {
-    e.preventDefault()
-    setIsDragging(true)
-  }
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return
-
-      // 计算新高度（从窗口底部到鼠标位置）
-      const newHeight = window.innerHeight - e.clientY
-      // 设置最小和最大高度
-      if (newHeight >= 100 && newHeight <= window.innerHeight * 0.8) {
-        setConsoleHeight(newHeight)
-      }
-    }
-
-    const handleMouseUp = () => {
-      setIsDragging(false)
-    }
-
-    if (isDragging) {
-      document.addEventListener("mousemove", handleMouseMove)
-      document.addEventListener("mouseup", handleMouseUp)
-    }
-
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove)
-      document.removeEventListener("mouseup", handleMouseUp)
-    }
-  }, [isDragging])
-
-  // 添加日志
-  const addLog = (text: string, type: LogEntry["type"] = "info") => {
-    const newLog: LogEntry = {
-      id: Date.now(),
-      timestamp: getTimestamp(),
-      type,
-      text,
-      html: convertAnsiToHTML(text), // 转换ANSI到HTML
-      isNew: true
-    }
-
-    setEnhancedLogs(prev => [...prev, newLog])
-  }
-
-  // 主题类
-  const getThemeClass = () => {
-    if (theme === "system") {
-      return systemTheme || "light";
-    }
-    return theme;
-  };
-
-  // 获取控制台背景和文本颜色
-  const getConsoleStyles = () => {
-    const themeClass = getThemeClass();
-    if (themeClass === "dark") {
-      return {
-        background: "bg-black",
-        text: "text-gray-200",
-        border: "border-gray-800",
-        input: "bg-gray-900 text-gray-200"
-      };
-    } else {
-      return {
-        background: "bg-white",
-        text: "text-gray-800",
-        border: "border-gray-200",
-        input: "bg-gray-100 text-gray-800"
-      };
-    }
-  };
-
-  // 自定义命令集
-  const customCommands = useMemo(() => {
+    
     return {
-      "clear": () => {
-        handleClearLogs()
-        return "控制台已清空"
-      },
-      "help": () => {
-        return `
-可用命令:
-  clear       - 清空控制台
-  help        - 显示此帮助信息
-  theme       - 切换主题 (用法: theme dark|light|system)
-  history     - 显示命令历史
-  size        - 修改字体大小 (用法: size 12-20)
-  fullscreen  - 切换全屏模式
-  exit        - 关闭控制台
-`
-      },
-      "theme": (args: string[]) => {
-        const newTheme = args[0] as ConsoleTheme
-        if (["dark", "light", "system"].includes(newTheme)) {
-          setTheme(newTheme)
-          // 如果需要同步系统主题
-          setSystemTheme(newTheme)
-          return `主题已切换为 ${newTheme}`
-        }
-        return "用法: theme dark|light|system"
-      },
-      "history": () => {
-        if (commandHistory.length === 0) {
-          return "命令历史为空"
-        }
-        return commandHistory.map((entry, i) =>
-            `${i + 1}. [${entry.timestamp}] ${entry.command}`
-        ).join("\n")
-      },
-      "size": (args: string[]) => {
-        const size = parseInt(args[0])
-        if (size >= 10 && size <= 20) {
-          setFontSize(size)
-          return `字体大小已设置为 ${size}px`
-        }
-        return "用法: size 10-20"
-      },
-      "fullscreen": () => {
-        setIsFullscreen(!isFullscreen)
-        return `全屏模式: ${!isFullscreen ? '开启' : '关闭'}`
-      },
-      "exit": () => {
-        setTimeout(() => onToggle(), 500)
-        return "正在关闭控制台..."
-      }
+      id,
+      timestamp,
+      level,
+      message,
+      indent: Math.min(indent, 5) // 最大5级缩进
     }
-  }, [commandHistory.length, handleClearLogs, isFullscreen, onToggle, setSystemTheme])
-
-  // 处理内置命令
-  const handleInternalCommand = (command: string): boolean => {
-    const parts = command.trim().split(" ")
-    const cmdName = parts[0].toLowerCase()
-    const args = parts.slice(1)
-
-    if (customCommands[cmdName as keyof typeof customCommands]) {
-      const result = customCommands[cmdName as keyof typeof customCommands](args)
-      addLog(`$ ${command}`, "command")
-      if (result) {
-        addLog(result, "result")
+  }, [])
+  
+  // 处理新日志 - 只处理新增的日志
+  useEffect(() => {
+    if (isPaused || logs.length <= processedLogsCount) return
+    
+    // 只处理新增的日志
+    const newLogs = logs.slice(processedLogsCount)
+    const newEntries = newLogs.map((log, index) => parseLogEntry(log, processedLogsCount + index))
+    
+    if (newEntries.length > 0) {
+      setLogEntries(prev => {
+        const combined = [...prev, ...newEntries]
+        // 限制最大日志数量
+        return combined.length > 1000 ? combined.slice(-1000) : combined
+      })
+      
+      // 更新已处理的日志数量
+      setProcessedLogsCount(logs.length)
+      
+      // 自动滚动到底部（如果用户没有手动滚动）
+      setTimeout(() => {
+        const scrollContainer = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]")
+        if (scrollContainer) {
+          const { scrollTop, scrollHeight, clientHeight } = scrollContainer
+          const isNearBottom = scrollHeight - scrollTop - clientHeight < 50
+          if (isNearBottom) {
+            scrollContainer.scrollTop = scrollContainer.scrollHeight
+          }
+        }
+      }, 10)
+    }
+  }, [logs, processedLogsCount, isPaused, parseLogEntry])
+  
+  // 过滤日志
+  const filteredLogs = useMemo(() => {
+    return logEntries.filter(entry => {
+      if (selectedLevel !== "all" && entry.level !== selectedLevel) {
+        return false
+      }
+      if (filter && !entry.message.toLowerCase().includes(filter.toLowerCase())) {
+        return false
       }
       return true
+    })
+  }, [logEntries, selectedLevel, filter])
+  
+  // 拖拽调整高度
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }, [])
+  
+  useEffect(() => {
+    if (!isDragging) return
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      const newHeight = window.innerHeight - e.clientY
+      setConsoleHeight(Math.max(200, Math.min(newHeight, window.innerHeight * 0.8)))
     }
-
-    return false
-  }
-
-  // 执行命令
-  const executeCommand = async () => {
-    if (!commandInput.trim()) return
-
+    
+    const handleMouseUp = () => setIsDragging(false)
+    
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isDragging])
+  
+  // 命令自动补全
+  const getCommandSuggestions = useCallback(async (input: string): Promise<string[]> => {
+    console.log('🔍 Getting suggestions for input:', input) // 调试日志
+    
+    const commonCommands = [
+      'ls', 'cd', 'pwd', 'mkdir', 'rmdir', 'rm', 'cp', 'mv', 'cat', 'grep', 'find', 'chmod', 'chown',
+      'tar', 'zip', 'unzip', '7z', 'gzip', 'gunzip',
+      'clear', 'pause', 'resume', 'help', 'exit',
+      'git', 'npm', 'pnpm', 'yarn', 'node', 'python', 'python3', 'pip', 'pip3',
+      'docker', 'docker-compose', 'kubectl', 'helm'
+    ]
+    
+    const parts = input.trim().split(' ')
+    const currentWord = parts[parts.length - 1]
+    
+    console.log('🔍 Input parts:', parts, 'Current word:', currentWord) // 调试日志
+    
+    if (parts.length === 1) {
+      // 补全命令名
+      const cmdSuggestions = commonCommands.filter(cmd => cmd.startsWith(currentWord.toLowerCase()))
+      console.log('📝 Command suggestions:', cmdSuggestions) // 调试日志
+      return cmdSuggestions
+    } else if (parts[0] === 'cd' && parts.length === 2) {
+      // cd 命令的路径补全
+      console.log('📁 Starting directory completion for:', currentWord) // 调试日志
+      
+      try {
+        // 获取当前输入的路径
+        let searchPath = currentWord
+        let basePath = currentWorkingDir
+        
+        console.log('📂 Initial search path:', searchPath, 'Base path:', basePath) // 调试日志
+        
+        if (searchPath.startsWith('/')) {
+          // 绝对路径
+          const lastSlash = searchPath.lastIndexOf('/')
+          basePath = searchPath.substring(0, lastSlash) || '/'
+          searchPath = searchPath.substring(lastSlash + 1)
+          console.log('🔗 Absolute path - Base:', basePath, 'Search:', searchPath) // 调试日志
+        } else if (searchPath.includes('/')) {
+          // 相对路径包含目录
+          const lastSlash = searchPath.lastIndexOf('/')
+          const relativePath = searchPath.substring(0, lastSlash)
+          basePath = resolvePath(relativePath, currentWorkingDir)
+          searchPath = searchPath.substring(lastSlash + 1)
+          console.log('🔗 Relative path - Base:', basePath, 'Search:', searchPath) // 调试日志
+        }
+        
+        // 读取目录内容
+        if (window.electron?.fs?.readDirectory) {
+          console.log('📖 Reading directory:', basePath) // 调试日志
+          
+          const entries = await window.electron.fs.readDirectory(basePath)
+          console.log('📋 Directory entries:', entries.length, entries.map(e => e.name)) // 调试日志
+          
+          const directories = entries
+            .filter(entry => entry.type === 'folder') // 注意：这里应该是 'folder' 而不是 'directory'
+            .map(entry => entry.name)
+            .filter(name => name.startsWith(searchPath))
+            .map(name => {
+              if (currentWord.includes('/')) {
+                const prefix = currentWord.substring(0, currentWord.lastIndexOf('/') + 1)
+                return prefix + name
+              }
+              return name
+            })
+          
+          console.log('📁 Filtered directories:', directories) // 调试日志
+          
+          // 添加特殊目录
+          const specialDirs = ['~', '..', './']
+          const filteredSpecial = specialDirs.filter(dir => dir.startsWith(searchPath))
+          
+          const allSuggestions = [...filteredSpecial, ...directories].slice(0, 10)
+          console.log('✅ Final suggestions:', allSuggestions) // 调试日志
+          
+          return allSuggestions
+        }
+      } catch (error) {
+        console.warn('❌ Directory completion failed:', error)
+      }
+      
+      // 回退到静态建议
+      const pathSuggestions = [
+        '~', '/', './', '../',
+        '~/Downloads', '~/Documents', '~/Desktop', '~/Pictures',
+        '/home', '/tmp', '/var', '/usr', '/opt'
+      ]
+      const fallbackSuggestions = pathSuggestions.filter(path => path.startsWith(currentWord))
+      console.log('🔄 Fallback suggestions:', fallbackSuggestions) // 调试日志
+      return fallbackSuggestions
+    }
+    
+    console.log('❌ No suggestions available') // 调试日志
+    return []
+  }, [currentWorkingDir, resolvePath])
+  
+  // 处理输入变化和自动补全
+  const handleInputChange = useCallback(async (value: string) => {
+    setCommandInput(value)
+    
+    if (value.trim()) {
+      const suggestions = await getCommandSuggestions(value)
+      setSuggestions(suggestions)
+      setShowSuggestions(suggestions.length > 0)
+      setSelectedSuggestion(-1)
+    } else {
+      setShowSuggestions(false)
+      setSuggestions([])
+    }
+  }, [getCommandSuggestions])
+  
+  // 应用建议
+  const applySuggestion = useCallback((suggestion: string) => {
+    const parts = commandInput.trim().split(' ')
+    parts[parts.length - 1] = suggestion
+    const newCommand = parts.join(' ')
+    setCommandInput(newCommand + ' ')
+    setShowSuggestions(false)
+    setSuggestions([])
+    setSelectedSuggestion(-1)
+    
+    // 重新聚焦输入框
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }, [commandInput])
+  
+  // 验证目录是否存在
+  const validateDirectory = useCallback(async (path: string): Promise<boolean> => {
     try {
-      // 添加命令到历史记录
-      const newEntry: CommandHistoryEntry = {
-        command: commandInput,
-        timestamp: getTimestamp()
+      console.log('🔍 Validating directory:', path) // 调试日志
+      
+      // 首先检查路径是否包含无效字符
+      if (path.includes('??') || path.includes('undefined') || path.includes('null')) {
+        console.log('❌ Invalid path contains special characters:', path)
+        return false
       }
-      setCommandHistory(prev => [...prev, newEntry])
-      setHistoryIndex(-1)
-
-      // 尝试处理内置命令
-      if (handleInternalCommand(commandInput)) {
-        setCommandInput("")
-        return
-      }
-
-      // 执行外部命令
-      if (onExecuteCommand) {
-        // 记录命令
-        addLog(`$ ${commandInput}`, "command")
-
-        // 执行命令
-        await onExecuteCommand(commandInput)
-
-        // 清空输入
-        setCommandInput("")
-
-        // 刷新文件列表
-        if (onRefresh) {
-          onRefresh()
+      
+      if (window.electron?.fs?.readDirectory) {
+        try {
+          console.log('🔧 Using Electron FS API to validate:', path)
+          const entries = await window.electron.fs.readDirectory(path)
+          console.log('✅ Directory validation successful:', path, `(${entries.length} entries)`)
+          return true
+        } catch (fsError: any) {
+          console.log('❌ File system error details:', {
+            path,
+            error: fsError,
+            code: fsError?.code,
+            message: fsError?.message
+          })
+          
+          // 明确检查错误类型
+          if (fsError?.code === 'ENOENT') {
+            console.log('❌ Directory does not exist:', path)
+            return false
+          } else if (fsError?.code === 'EACCES') {
+            console.log('❌ Permission denied:', path)
+            return false
+          } else {
+            console.log('❌ Other file system error:', path, fsError)
+            return false
+          }
+        }
+      } else {
+        console.warn('⚠️ No file system API available for validation:', path)
+        
+        // 没有文件系统API时，进行更严格的路径检查
+        if (!path || path.trim() === '' || path.includes('??')) {
+          console.log('❌ Invalid path format:', path)
+          return false
+        }
+        
+        // 对于常见的系统路径，我们可以做一些基本检查
+        const commonValidPaths = [
+          '/home', '/tmp', '/var', '/usr', '/opt', '/etc', '/bin', '/sbin',
+          '/home/user', '/home/cagliostro'
+        ]
+        
+        // 检查是否是常见的有效路径或其子路径
+        const isCommonPath = commonValidPaths.some(validPath => 
+          path === validPath || path.startsWith(validPath + '/')
+        )
+        
+        if (isCommonPath) {
+          console.log('📁 Assuming common system path is valid:', path)
+          return true
+        } else {
+          console.log('❌ Unknown path, cannot validate without API:', path)
+          return false
         }
       }
     } catch (error) {
-      console.error("执行命令时出错:", error)
-      addLog(`执行出错: ${error}`, "error")
+      console.log('❌ Directory validation failed with exception:', path, error)
+      return false
     }
-  }
+  }, [])
+  
+  // 命令处理
+  const handleCommand = useCallback(async () => {
+    if (!commandInput.trim()) return
 
-  // 复制所有日志
-  const copyLogs = () => {
-    // 使用纯文本版本（无ANSI代码）
-    const logText = enhancedLogs.map(log => `[${log.timestamp}] ${stripAnsiCodes(log.text)}`).join('\n')
-    navigator.clipboard.writeText(logText).then(() => {
-      setIsCopied(true)
-      setTimeout(() => setIsCopied(false), 2000)
+    const input = commandInput.trim()
+    const parts = input.split(' ')
+    const command = parts[0]
+    const args = parts.slice(1)
+    
+    // 添加到历史
+    setCommandHistory(prev => {
+      const newHistory = [...prev.filter(cmd => cmd !== input), input]
+      return newHistory.slice(-50) // 保留最近50条
     })
-  }
+    setHistoryIndex(-1)
 
+    // 内置命令处理
+    if (command === 'clear') {
+      setLogEntries([])
+      setProcessedLogsCount(0)
+      if (onClear) onClear()
+      setCommandInput("")
+      return
+    }
+
+    if (command === 'pause') {
+      setIsPaused(true)
+      setCommandInput("")
+      return
+    }
+
+    if (command === 'resume') {
+      setIsPaused(false)
+      setCommandInput("")
+      return
+    }
+
+    if (command === 'pwd') {
+      // 显示当前工作目录
+      const logEntry: LogEntry = {
+        id: `pwd-${Date.now()}`,
+        timestamp: new Date(),
+        level: "output",
+        message: currentWorkingDir
+      }
+      setLogEntries(prev => [...prev, logEntry])
+      setCommandInput("")
+      return
+    }
+
+    // cd 命令处理
+    if (command === 'cd') {
+      let targetPath = ''
+      
+      console.log('🚀 CD command started, args:', args) // 调试日志
+      
+      if (!args.length || args[0] === '~') {
+        // cd 或 cd ~ - 回到家目录
+        try {
+          targetPath = (window.electron as any)?.os?.homedir?.() || "/home/user"
+          console.log('🏠 Using home directory:', targetPath) // 调试日志
+        } catch {
+          targetPath = "/home/user"
+          console.log('🏠 Fallback to default home:', targetPath) // 调试日志
+        }
+      } else {
+        // 处理其他路径（相对或绝对）
+        const inputPath = args[0]
+        console.log('📁 Input path:', inputPath) // 调试日志
+        console.log('📂 Current working dir:', currentWorkingDir) // 调试日志
+        
+        if (inputPath.startsWith('/')) {
+          // 绝对路径 - 直接规范化
+          targetPath = normalizePath(inputPath)
+          console.log('🔗 Absolute path normalized:', inputPath, '→', targetPath) // 调试日志
+        } else {
+          // 相对路径 - 基于当前目录解析
+          targetPath = resolvePath(inputPath, currentWorkingDir)
+          console.log('🔗 Relative path resolved:', inputPath, '+', currentWorkingDir, '→', targetPath) // 调试日志
+        }
+      }
+      
+      console.log('🎯 Final target path:', targetPath) // 调试日志
+      
+      // 验证目录是否存在
+      try {
+        const isValid = await validateDirectory(targetPath)
+        if (isValid) {
+          setCurrentWorkingDir(targetPath)
+          addLog(`Changed directory to: ${targetPath}`, 'info')
+          
+          // 显示路径规范化信息（如果路径被规范化了）
+          if (args.length > 0 && args[0] !== targetPath && !args[0].startsWith('/')) {
+            addLog(`Path normalized: ${args[0]} → ${targetPath}`, 'info')
+          }
+        } else {
+          addLog(`cd: ${args[0] || '~'}: No such file or directory`, 'error')
+        }
+      } catch (error) {
+        console.error('❌ CD validation error:', error) // 调试日志
+        addLog(`cd: ${args[0] || '~'}: Permission denied or directory not accessible`, 'error')
+      }
+      
+      // 清除输入缓存
+      setCommandInput("")
+      return
+    }
+
+    // 清空输入
+    setCommandInput("")
+
+    // 执行外部命令（在当前工作目录下）
+    if (onExecuteCommand) {
+      try {
+        // 构造带 cd 的命令
+        const fullCommand = currentWorkingDir !== '/' 
+          ? `cd "${currentWorkingDir}" && ${input}`
+          : input
+        await onExecuteCommand(fullCommand)
+      } catch (error) {
+        console.error('Command execution failed:', error)
+      }
+    }
+  }, [commandInput, onClear, onExecuteCommand, currentWorkingDir, normalizePath, resolvePath, addLog, validateDirectory])
+  
+  // 键盘事件处理
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      if (showSuggestions && selectedSuggestion >= 0) {
+        // 应用选中的建议
+        applySuggestion(suggestions[selectedSuggestion])
+      } else {
+        handleCommand()
+      }
+    } else if (e.key === 'Tab') {
+      e.preventDefault()
+      console.log('⌨️ Tab pressed - Current suggestions:', suggestions.length, 'Show suggestions:', showSuggestions) // 调试日志
+      
+      if (showSuggestions && suggestions.length > 0) {
+        if (selectedSuggestion >= 0) {
+          // 应用当前选中的建议
+          console.log('✅ Applying selected suggestion:', suggestions[selectedSuggestion]) // 调试日志
+          applySuggestion(suggestions[selectedSuggestion])
+        } else {
+          // 选中第一个建议
+          console.log('🎯 Selecting first suggestion') // 调试日志
+          setSelectedSuggestion(0)
+        }
+      } else {
+        // 触发补全
+        console.log('🔍 Triggering completion for:', commandInput) // 调试日志
+        
+        // 强制重新获取建议
+        const getSuggestionsAndShow = async () => {
+          const newSuggestions = await getCommandSuggestions(commandInput)
+          console.log('📋 Got new suggestions:', newSuggestions) // 调试日志
+          
+          if (newSuggestions.length > 0) {
+            setSuggestions(newSuggestions)
+            setShowSuggestions(true)
+            setSelectedSuggestion(0) // 自动选中第一个
+          } else {
+            console.log('❌ No suggestions found') // 调试日志
+          }
+        }
+        
+        getSuggestionsAndShow()
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setShowSuggestions(false)
+      setSuggestions([])
+      setSelectedSuggestion(-1)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (showSuggestions) {
+        // 在建议中向上导航
+        setSelectedSuggestion(prev => 
+          prev <= 0 ? suggestions.length - 1 : prev - 1
+        )
+      } else if (commandHistory.length > 0) {
+        // 历史命令导航
+        const newIndex = Math.min(historyIndex + 1, commandHistory.length - 1)
+        setHistoryIndex(newIndex)
+        setCommandInput(commandHistory[commandHistory.length - 1 - newIndex])
+        // 清除建议
+        setShowSuggestions(false)
+        setSuggestions([])
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (showSuggestions) {
+        // 在建议中向下导航
+        setSelectedSuggestion(prev => 
+          prev >= suggestions.length - 1 ? 0 : prev + 1
+        )
+      } else if (historyIndex > 0) {
+        // 历史命令导航
+        const newIndex = historyIndex - 1
+        setHistoryIndex(newIndex)
+        setCommandInput(commandHistory[commandHistory.length - 1 - newIndex])
+        // 清除建议
+        setShowSuggestions(false)
+        setSuggestions([])
+      } else if (historyIndex === 0) {
+        setHistoryIndex(-1)
+        setCommandInput("")
+        // 清除建议
+        setShowSuggestions(false)
+        setSuggestions([])
+      }
+    } else if (e.key === 'l' && e.ctrlKey) {
+      e.preventDefault()
+      setLogEntries([])
+      setProcessedLogsCount(0)
+      if (onClear) onClear()
+    }
+  }, [handleCommand, commandHistory, historyIndex, onClear, showSuggestions, suggestions, selectedSuggestion, applySuggestion, commandInput, handleInputChange])
+  
+  // 滚动到底部
+  const scrollToBottom = useCallback(() => {
+    const scrollContainer = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]")
+    if (scrollContainer) {
+      scrollContainer.scrollTop = scrollContainer.scrollHeight
+    }
+  }, [])
+  
+  // 滚动到顶部
+  const scrollToTop = useCallback(() => {
+    const scrollContainer = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]")
+    if (scrollContainer) {
+      scrollContainer.scrollTop = 0
+    }
+  }, [])
+  
+  // 复制日志
+  const copyLogs = useCallback(() => {
+    const text = filteredLogs.map(entry => {
+      const timestamp = `[${entry.timestamp.toLocaleTimeString()}]`
+      const level = `[${entry.level.toUpperCase()}]`
+      const indent = '  '.repeat(entry.indent || 0)
+      return `${timestamp} ${level} ${indent}${entry.message}`
+    }).join('\n')
+    
+    navigator.clipboard.writeText(text)
+  }, [filteredLogs])
+  
   // 下载日志
-  const downloadLogs = () => {
-    // 使用纯文本版本（无ANSI代码）
-    const logText = enhancedLogs.map(log => `[${log.timestamp}] [${log.type}] ${stripAnsiCodes(log.text)}`).join('\n')
-    const blob = new Blob([logText], { type: 'text/plain' })
+  const downloadLogs = useCallback(() => {
+    const text = filteredLogs.map(entry => {
+      const timestamp = entry.timestamp.toISOString()
+      const indent = '  '.repeat(entry.indent || 0)
+      return `${timestamp} [${entry.level.toUpperCase()}] ${indent}${entry.message}`
+    }).join('\n')
+    
+    const blob = new Blob([text], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -652,418 +751,237 @@ export function Console({ isOpen, onToggle, logs = [], onClear, onExecuteCommand
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-  }
-
-  // 处理键盘事件
-  const handleKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
-    // 如果显示建议，处理上下键选择建议
-    if (showSuggestions && suggestions.length > 0) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault()
-        setSelectedSuggestion(prev => (prev + 1) % suggestions.length)
-        return
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault()
-        setSelectedSuggestion(prev => (prev - 1 + suggestions.length) % suggestions.length)
-        return
-      } else if (e.key === "Tab" || e.key === "Enter") {
-        e.preventDefault()
-        setCommandInput(suggestions[selectedSuggestion])
-        setShowSuggestions(false)
-        if (e.key === "Enter") {
-          executeCommand()
-        }
-        return
-      } else if (e.key === "Escape") {
-        setShowSuggestions(false)
-        return
-      }
-    }
-
-    // 普通键处理
-    if (e.key === "Enter") {
-      executeCommand()
-    } else if (e.key === "Tab") {
-      e.preventDefault()
-      showCommandSuggestions()
-    } else if (e.key === "ArrowUp" && !showSuggestions) {
-      // 向上浏览历史
-      if (commandHistory.length > 0 && historyIndex < commandHistory.length - 1) {
-        const newIndex = historyIndex + 1
-        setHistoryIndex(newIndex)
-        setCommandInput(commandHistory[commandHistory.length - 1 - newIndex].command)
-      }
-    } else if (e.key === "ArrowDown" && !showSuggestions) {
-      // 向下浏览历史
-      if (historyIndex > 0) {
-        const newIndex = historyIndex - 1
-        setHistoryIndex(newIndex)
-        setCommandInput(commandHistory[commandHistory.length - 1 - newIndex].command)
-      } else if (historyIndex === 0) {
-        setHistoryIndex(-1)
-        setCommandInput("")
-      }
-    } else if (e.key === "l" && e.ctrlKey) {
-      // Ctrl+L 清屏
-      e.preventDefault()
-      handleClearLogs()
-    }
-  }
-
-  // 显示命令建议
-  const showCommandSuggestions = () => {
-    const input = commandInput.trim()
-    if (!input) {
-      setSuggestions([])
-      setShowSuggestions(false)
-      return
-    }
-
-    // 合并内置命令和常用命令
-    const availableCommands = [
-      ...Object.keys(customCommands),
-      ...COMMON_COMMANDS
-    ]
-
-    // 过滤匹配的命令
-    const matches = availableCommands.filter(cmd =>
-        cmd.startsWith(input) && cmd !== input
+  }, [filteredLogs])
+  
+  // 渲染日志条目
+  const renderLogEntry = useCallback((entry: LogEntry) => {
+    return (
+      <div
+        key={entry.id}
+        className="flex items-start gap-2 py-1 hover:bg-muted/50 transition-colors text-sm"
+      >
+        <span className="text-xs text-muted-foreground font-mono shrink-0 w-20">
+          {entry.timestamp.toLocaleTimeString()}
+        </span>
+        
+        <Badge 
+          variant="outline" 
+          className={`text-xs shrink-0 ${LOG_LEVEL_COLORS[entry.level]}`}
+        >
+          {LOG_LEVEL_BADGES[entry.level]}
+        </Badge>
+        
+        <pre 
+          className={`font-mono text-sm break-all whitespace-pre-wrap ${LOG_LEVEL_COLORS[entry.level]} m-0 p-0`}
+          style={{ fontFamily: 'inherit' }}
+        >
+          {entry.message}
+        </pre>
+      </div>
     )
-
-    // 从历史记录中找出匹配的命令
-    const historyMatches = commandHistory
-        .map(entry => entry.command)
-        .filter(cmd => cmd.startsWith(input) && cmd !== input && !matches.includes(cmd))
-
-    // 合并并去重
-    const allSuggestions = [...new Set([...matches, ...historyMatches])]
-
-    if (allSuggestions.length > 0) {
-      setSuggestions(allSuggestions)
-      setShowSuggestions(true)
-      setSelectedSuggestion(0)
-    } else {
-      setShowSuggestions(false)
-    }
+  }, [])
+  
+  if (!isOpen) {
+    return (
+      <div className="fixed bottom-0 left-0 right-0 z-40">
+        <div className="flex items-center justify-between bg-background border-t p-2">
+          <Button variant="outline" size="sm" onClick={onToggle}>
+            <Terminal className="mr-2 h-4 w-4" />
+            控制台
+          </Button>
+        </div>
+      </div>
+    )
   }
-
-  // 当输入改变时更新建议
-  useEffect(() => {
-    if (commandInput.trim()) {
-      showCommandSuggestions()
-    } else {
-      setShowSuggestions(false)
-    }
-  }, [commandInput])
-
-  // 控制台可见性
-  if (!isVisible && !isOpen) return null
-
-  // 计算控制台和建议框的样式
-  const consoleContainerStyle = isFullscreen
-      ? {
-        position: "fixed" as const,
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 50,
-        height: "100vh",
-        display: "flex",
-        flexDirection: "column" as const
-      }
-      : {
-        height: isOpen ? `${consoleHeight}px` : "0px",
-        opacity: isOpen ? 1 : 0,
-        overflow: "hidden" as const
-      }
-
-  // 用于渲染HTML内容
-  const HtmlContent = ({ html }) => {
-    if (!html) return null;
-    return <span dangerouslySetInnerHTML={{ __html: html }} />;
-  };
-
+  
   return (
-      <div className={`fixed bottom-0 left-0 right-0 z-40 ${isFullscreen ? 'top-0' : ''}`}>
-        {/* 控制台标题栏 */}
-        <div className={`flex items-center justify-between ${getConsoleStyles().background} border-t ${getConsoleStyles().border}`}>
-          <div className="flex items-center">
-            <Button variant="outline" size="sm" onClick={onToggle} className="m-1">
+    <div className="fixed bottom-0 left-0 right-0 z-40">
+      {/* 拖拽条 */}
+      <div
+        className="h-1 w-full cursor-ns-resize hover:bg-primary/20 transition-colors bg-border"
+        onMouseDown={handleMouseDown}
+      />
+      
+      {/* 控制台主体 */}
+      <div 
+        className="bg-background border-t flex flex-col"
+        style={{ height: `${consoleHeight}px` }}
+      >
+        {/* 标题栏 */}
+        <div className="flex items-center justify-between p-2 border-b bg-muted/30 shrink-0">
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={onToggle}>
               <Terminal className="mr-2 h-4 w-4" />
-              {t("console")}
+              控制台
             </Button>
-
-            {isOpen && (
-                <>
-                  <Tabs value={activeTab} onValueChange={setActiveTab} className="mr-2">
-                    <TabsList className="h-8">
-                      <TabsTrigger value="terminal" className="text-xs px-2 py-1">
-                        {t("terminal")}
-                      </TabsTrigger>
-                      <TabsTrigger value="logs" className="text-xs px-2 py-1">
-                        {t("logs")}
-                      </TabsTrigger>
-                    </TabsList>
-                  </Tabs>
-
-                  <div className="flex items-center">
-                    <Button variant="ghost" size="sm" onClick={handleClearLogs} title={t("clear")} className="h-8 w-8 p-0">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={copyLogs}
-                        title={isCopied ? t("copied") : t("copy")}
-                        className="h-8 w-8 p-0 ml-1"
-                    >
-                      <Copy className="h-4 w-4" />
-                      {isCopied && <span className="absolute -top-8 bg-black text-white text-xs p-1 rounded">已复制</span>}
-                    </Button>
-
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={downloadLogs}
-                        title={t("download")}
-                        className="h-8 w-8 p-0 ml-1"
-                    >
-                      <Download className="h-4 w-4" />
-                    </Button>
-
-                    {/* 主题切换按钮 */}
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          const newTheme = getThemeClass() === "dark" ? "light" : "dark";
-                          setTheme(newTheme as ConsoleTheme);
-                          setSystemTheme(newTheme);
-                        }}
-                        title={getThemeClass() === "dark" ? "切换到亮色模式" : "切换到暗色模式"}
-                        className="h-8 w-8 p-0 ml-1"
-                    >
-                      {getThemeClass() === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                </>
+            
+            <Separator orientation="vertical" className="h-4" />
+            
+            <Badge variant="secondary" className="text-xs">
+              {filteredLogs.length} 条日志
+            </Badge>
+            
+            {isPaused && (
+              <Badge variant="destructive" className="text-xs">
+                已暂停
+              </Badge>
             )}
           </div>
-
-          {isOpen && isFullscreen && (
-              <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsFullscreen(false)}
-                  className="h-8 w-8 p-0 mr-2"
-              >
-                <X className="h-4 w-4" />
-              </Button>
+          
+          <div className="flex items-center gap-1">
+            {/* 级别过滤 */}
+            <select
+              value={selectedLevel}
+              onChange={(e) => setSelectedLevel(e.target.value)}
+              className="text-xs bg-background border rounded px-2 py-1"
+            >
+              <option value="all">全部</option>
+              <option value="command">命令</option>
+              <option value="output">输出</option>
+              <option value="error">错误</option>
+              <option value="warning">警告</option>
+              <option value="success">成功</option>
+              <option value="info">信息</option>
+            </select>
+            
+            {/* 搜索 */}
+            <Input
+              placeholder="过滤..."
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="w-32 h-8 text-xs"
+            />
+            
+            <Separator orientation="vertical" className="h-4" />
+            
+            {/* 控制按钮 */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsPaused(!isPaused)}
+              title={isPaused ? "恢复" : "暂停"}
+            >
+              {isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={scrollToTop}
+              title="跳转到顶部"
+            >
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={scrollToBottom}
+              title="跳转到底部"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setLogEntries([])
+                setProcessedLogsCount(0)
+                if (onClear) onClear()
+              }}
+              title="清空"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={copyLogs}
+              title="复制"
+            >
+              <Copy className="h-4 w-4" />
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={downloadLogs}
+              title="下载"
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+        
+        {/* 日志区域 - 可滚动 */}
+        <div className="flex-1 min-h-0">
+          <ScrollArea className="h-full" ref={scrollAreaRef}>
+            <div ref={logContainerRef} className="p-2">
+              {filteredLogs.length > 0 ? (
+                filteredLogs.map(renderLogEntry)
+              ) : (
+                <div className="text-center text-muted-foreground py-8">
+                  <Terminal className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">暂无日志</p>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+        
+        {/* 命令输入区 - 固定在底部 */}
+        <div className="border-t bg-background shrink-0">
+          {/* 自动补全建议 */}
+          {showSuggestions && suggestions.length > 0 && (
+            <div className="border-b bg-muted/20 max-h-32 overflow-y-auto">
+              {suggestions.map((suggestion, index) => (
+                <div
+                  key={suggestion}
+                  className={`px-3 py-1 text-sm font-mono cursor-pointer transition-colors ${
+                    index === selectedSuggestion 
+                      ? 'bg-primary text-primary-foreground' 
+                      : 'hover:bg-muted/50'
+                  }`}
+                  onClick={() => applySuggestion(suggestion)}
+                >
+                  {suggestion}
+                </div>
+              ))}
+            </div>
           )}
+          
+          {/* 当前工作目录显示 */}
+          <div className="px-2 py-1 text-xs text-muted-foreground bg-muted/10 border-b">
+            <span className="font-mono">工作目录: {currentWorkingDir}</span>
+          </div>
+          
+          {/* 命令输入 */}
+          <div className="p-2">
+            <div className="flex items-center gap-2">
+              <span className="text-green-400 font-mono font-bold">$</span>
+              <Input
+                ref={inputRef}
+                value={commandInput}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="输入命令... (Tab 补全, ↑↓ 浏览历史/建议, Ctrl+L 清空)"
+                className="flex-1 font-mono"
+                autoFocus
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleCommand}
+                disabled={!commandInput.trim()}
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
         </div>
-
-        {/* 拖动条 */}
-        {isOpen && !isFullscreen && (
-            <div
-                className="h-1 w-full cursor-ns-resize hover:bg-accent transition-colors"
-                onMouseDown={startDragging}
-            ></div>
-        )}
-
-        {/* 控制台主体 */}
-        <div
-            className={`
-          transition-all duration-300 ease-in-out bg-background
-          border-t ${isFullscreen ? 'flex-1' : ''}
-        `}
-            style={consoleContainerStyle}
-        >
-          <Tabs value={activeTab} className="h-full">
-            {/* 日志标签页 */}
-            <TabsContent value="logs" className="h-full m-0 p-0">
-              <ScrollArea className="h-full" ref={scrollAreaRef}>
-                <div
-                    className={`font-mono p-2 whitespace-pre-wrap ${getConsoleStyles().background} ${getConsoleStyles().text}`}
-                    style={{ fontSize: `${fontSize}px` }}
-                >
-                  {enhancedLogs.length > 0 ? (
-                      enhancedLogs.map((log, index) => {
-                        return (
-                            <div key={log.id} className={`inline ${log.isNew ? "console-log-entry" : ""}`}>
-                              <span className="text-gray-500">[{log.timestamp}]</span>
-                              {' '}
-                              <span
-                                  className={`
-                            ${log.type === "error" ? "text-red-500" : ""}
-                            ${log.type === "warning" ? "text-amber-500" : ""}
-                            ${log.type === "success" ? "text-green-500" : ""}
-                            ${log.type === "command" ? "text-blue-500 font-semibold" : ""}
-                            ${log.type === "result" ? "text-purple-500" : ""}
-                          `}
-                              >
-                                {log.html ? <HtmlContent html={log.html} /> : formatLogText(log.text)}
-                              </span>
-                            </div>
-                        );
-                      })
-                  ) : (
-                      <div className="text-sm text-muted-foreground italic">
-                        {t("noLogs")}
-                      </div>
-                  )}
-                </div>
-              </ScrollArea>
-            </TabsContent>
-
-            {/* 终端标签页 */}
-            <TabsContent value="terminal" className="h-full m-0 p-0 flex flex-col">
-              <ScrollArea className="flex-1" ref={scrollAreaRef}>
-                <div
-                    className={`font-mono p-2 ${getConsoleStyles().background} ${getConsoleStyles().text}`}
-                    style={{ fontSize: `${fontSize}px`, lineHeight: "1.3" }}
-                >
-                  {enhancedLogs.length > 0 ? (
-                      enhancedLogs.map((log, index) => {
-                        return (
-                            <div key={log.id} className={`${log.isNew ? "console-log-entry" : ""}`}>
-                              <span className="text-gray-500">[{log.timestamp}]</span>
-                              {' '}
-                              <span
-                                  className={`
-                            ${log.type === "error" ? "text-red-500" : ""}
-                            ${log.type === "warning" ? "text-amber-500" : ""}
-                            ${log.type === "success" ? "text-green-500" : ""}
-                            ${log.type === "command" ? "text-blue-500 font-semibold" : ""}
-                            ${log.type === "result" ? "text-purple-500" : ""}
-                          `}
-                              >
-                                {log.html ? <HtmlContent html={log.html} /> : formatLogText(log.text)}
-                              </span>
-                            </div>
-                        );
-                      })
-                  ) : (
-                      <div className="text-gray-400 italic">
-                        欢迎使用增强版控制台！输入 'help' 获取可用命令列表。
-                      </div>
-                  )}
-                </div>
-              </ScrollArea>
-
-              {/* 命令输入区 */}
-              <div className={`flex items-center p-2 border-t ${getConsoleStyles().border} ${getConsoleStyles().background}`}>
-                <div className="text-green-400 font-bold mr-2" style={{ fontSize: `${fontSize}px` }}>$</div>
-                <div className="relative flex-1">
-                  <Input
-                      ref={inputRef}
-                      value={commandInput}
-                      onChange={(e) => setCommandInput(e.target.value)}
-                      onKeyDown={handleKeyPress}
-                      placeholder={t("enterCommand")}
-                      className={`flex-1 border-0 ${getConsoleStyles().input} focus-visible:ring-0 focus-visible:ring-offset-0`}
-                      style={{ fontSize: `${fontSize}px` }}
-                  />
-
-                  {/* 命令建议下拉框 */}
-                  {showSuggestions && suggestions.length > 0 && (
-                      <div className={`absolute left-0 right-0 bottom-full ${getConsoleStyles().background === 'bg-black' ? 'bg-gray-900' : 'bg-gray-100'} border ${getConsoleStyles().border} rounded-md shadow-lg max-h-60 overflow-y-auto z-50`}>
-                        {suggestions.map((suggestion, index) => (
-                            <div
-                                key={suggestion}
-                                className={`
-                          px-2 py-1 cursor-pointer ${getConsoleStyles().text}
-                          ${index === selectedSuggestion ? (getConsoleStyles().background === 'bg-black' ? 'bg-gray-700' : 'bg-gray-300') : (getConsoleStyles().background === 'bg-black' ? 'hover:bg-gray-800' : 'hover:bg-gray-200')}
-                        `}
-                                onClick={() => {
-                                  setCommandInput(suggestion)
-                                  setShowSuggestions(false)
-                                  inputRef.current?.focus()
-                                }}
-                            >
-                              {suggestion}
-                            </div>
-                        ))}
-                      </div>
-                  )}
-                </div>
-
-                <Button variant="ghost" size="icon" onClick={executeCommand} className={`ml-1 ${getConsoleStyles().text} hover:bg-transparent`}>
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
-            </TabsContent>
-          </Tabs>
-        </div>
-
-        {/* 动画和主题样式 */}
-        <style jsx global>{`
-        @keyframes slideIn {
-          from {
-            transform: translateX(-5px);
-            opacity: 0;
-          }
-          to {
-            transform: translateX(0);
-            opacity: 1;
-          }
-        }
-
-        .console-log-entry {
-          animation: slideIn 0.3s ease-out forwards;
-        }
-        
-        /* 根据主题设置样式 */
-        .terminal-${theme === "system" ? "auto" : theme} {
-          font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-        }
-        
-        /* 去除每行之间的间隔 */
-        .scrollArea-viewport > div > div {
-          margin: 0 !important;
-          padding: 0 !important;
-          line-height: 1.2 !important;
-        }
-        
-        /* 增加代码块样式，根据主题调整 */
-        pre {
-          background-color: ${getThemeClass() === "dark" ? "#1a1a1a" : "#f5f5f5"};
-          border-radius: 4px;
-          padding: 8px;
-          margin: 4px 0;
-          overflow-x: auto;
-        }
-        
-        /* 美化时间戳格式 */
-        .timestamp {
-          opacity: 0.7;
-          font-style: italic;
-        }
-        
-        /* 给链接添加样式 */
-        a {
-          color: ${getThemeClass() === "dark" ? "#3b82f6" : "#2563eb"};
-          text-decoration: underline;
-          text-underline-offset: 2px;
-        }
-        
-        /* 终端光标闪烁效果 */
-        @keyframes blink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0; }
-        }
-        
-        .cursor {
-          display: inline-block;
-          width: 8px;
-          height: 16px;
-          background-color: ${getThemeClass() === "dark" ? "#fff" : "#000"};
-          animation: blink 1s step-end infinite;
-          margin-left: 2px;
-          vertical-align: middle;
-        }
-      `}</style>
       </div>
+    </div>
   )
 }
