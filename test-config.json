@@ -1,0 +1,68 @@
+{
+  "appName": "cazip",
+  "version": "1.0.0",
+  "description": "一个类似Bandizip的压缩软件",
+  "features": {
+    "compression": {
+      "formats": ["zip", "7z", "tar", "gz", "rar"],
+      "levels": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      "passwordProtection": true,
+      "volumeSplitting": true
+    },
+    "preview": {
+      "textFiles": {
+        "syntaxHighlighting": true,
+        "searchFunction": true,
+        "editMode": true,
+        "supportedLanguages": [
+          "javascript",
+          "typescript", 
+          "python",
+          "json",
+          "html",
+          "css",
+          "xml",
+          "bash",
+          "sql",
+          "yaml",
+          "markdown"
+        ]
+      },
+      "imageFiles": {
+        "zoomFunction": true,
+        "panFunction": true,
+        "zoomRange": {
+          "min": 0.1,
+          "max": 5.0
+        },
+        "supportedFormats": [
+          "jpg", "jpeg", "png", "gif", 
+          "bmp", "webp", "svg", "ico"
+        ]
+      }
+    },
+    "interface": {
+      "themes": ["light", "dark", "system"],
+      "languages": ["zh", "en"],
+      "windowSize": {
+        "width": "6xl",
+        "height": "90vh"
+      }
+    }
+  },
+  "settings": {
+    "maxPreviewSize": 10485760,
+    "logLevel": "info",
+    "autoSave": false,
+    "showHiddenFiles": false
+  },
+  "shortcuts": {
+    "search": "Ctrl+F",
+    "save": "Ctrl+S",
+    "edit": "F2",
+    "preview": "Space",
+    "zoomIn": "Ctrl++",
+    "zoomOut": "Ctrl+-",
+    "resetZoom": "Ctrl+0"
+  }
+} 
